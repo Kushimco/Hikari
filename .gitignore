@@ -1,3 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.env
+venv/
+env/
+
+# Tauri/Rust
+target/
+tauri-build/
+Cargo.lock
+
+# OS/Editor junk files
+.DS_Store
+Thumbs.db
+
 # Logs
 logs
 *.log
