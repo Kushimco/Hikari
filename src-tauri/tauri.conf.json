@@ -15,11 +15,11 @@
         "title": "Hikari",
         "width": 1440,
         "height": 960,
-        "resizable": true,
+        "resizable": false,
         "fullscreen": false,
         "center": true,
-        "decorations": true,
-        "transparent": false
+        "decorations": false,
+        "transparent": true 
       }
     ],
     "security": {
