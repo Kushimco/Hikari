@@ -82,11 +82,11 @@
 <style>
   :global(body) {
     margin: 0;
-    padding: 0;
-    font-family: 'Segoe UI', 'Inter', sans-serif;
-    background-color: #fcfbf9; /* Creamy base */
-    color: #4a4a4a;
-    overflow: hidden; /* Prevent body scroll */
+    background: linear-gradient(180deg, #FFF8F3 0%, #DEAA84 100%);
+    min-height: 100vh;
+    height: 100vh; 
+    overflow: hidden; 
+    font-family: 'Inter', sans-serif;
   }
 
   main {
