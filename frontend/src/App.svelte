@@ -1,294 +1,348 @@
 <script lang="ts">
-  let bookTitle = "";
-  let books = [
-    {
-      title: "The Alchemist",
-      author: "Paulo Coelho",
-      cover: "https://covers.openlibrary.org/b/id/10520157-L.jpg",
-      summary: "A journey of self-discovery and following one's dreams."
-    }
-  ];
+  // --- Imports ---
+  import { onMount } from 'svelte';
+  import { spring } from 'svelte/motion';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
 
-  function addBook() {
-    if (bookTitle.trim()) {
-      books = [
-        ...books,
-        {
-          title: bookTitle,
-          author: "Loading...",
-          cover: "https://via.placeholder.com/120x180?text=?",
-          summary: "Fetching summary..."
-        }
-      ];
-      bookTitle = "";
+  // --- App Window Logic ---
+  const appWindow = getCurrentWindow();
+
+  async function closeApp() {
+    await appWindow.close();
+  }
+
+  // --- State Variables ---
+  let bookTitle = "";
+  let isPulsing = false;
+  let isFocused = false;
+  let activeTab = 'home'; // Tracks current sidebar selection
+
+  // --- Physics / Animation Engine ---
+  const orbY = spring(0, { stiffness: 0.02, damping: 0.1 });
+  let animationFrame: number;
+  let startTime = Date.now();
+
+  function loop() {
+    if (!isFocused) {
+      // Gentle floating motion when not focused
+      const time = (Date.now() - startTime) / 1200;
+      const y = Math.sin(time) * 15;
+      orbY.set(y);
+    } else {
+      // Center orb when typing
+      orbY.set(0);
+    }
+    animationFrame = requestAnimationFrame(loop);
+  }
+
+  onMount(() => {
+    loop();
+    return () => cancelAnimationFrame(animationFrame);
+  });
+
+  // --- Event Handlers ---
+  function handleInput() {
+    isPulsing = true;
+    setTimeout(() => isPulsing = false, 100);
+  }
+
+  function handleFocus() { isFocused = true; }
+  function handleBlur() { isFocused = false; }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && bookTitle.trim()) {
+      console.log("Adding book:", bookTitle);
+      bookTitle = ""; 
     }
   }
 </script>
 
+<!-- ============================================ -->
+<!-- UI MARKUP                                    -->
+<!-- ============================================ -->
+
+<!-- Draggable Title Bar -->
+<div data-tauri-drag-region class="titlebar">
+  <button class="exit-btn" on:click={closeApp} aria-label="Close application">
+    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+  </button>
+</div>
+
 <main>
-  <!-- Background elements to make the glass effect pop -->
+  <!-- Ambient Background Effects -->
   <div class="ambient-light one"></div>
   <div class="ambient-light two"></div>
 
-  <aside class="sidebar glass">
-    <div class="brand">
-      <h2>Hikari</h2>
-    </div>
-    <nav>
-      <a class="active"><span class="icon">📚</span> Library</a>
-      <a><span class="icon">✨</span> Wishlist</a>
-      <a><span class="icon">📈</span> Stats</a>
-      <div class="spacer"></div>
-      <a><span class="icon">⚙️</span> Settings</a>
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <div class="line"></div>
+    
+    <nav class="nav-menu">
+      <!-- 1. Home Button (Square) -->
+      <button 
+        class="nav-btn" 
+        class:active={activeTab === 'home'} 
+        on:click={() => activeTab = 'home'}
+        aria-label="Home">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        </svg>
+      </button>
+      
+      <!-- 2. Menu Button (Lines) -->
+      <button 
+        class="nav-btn" 
+        class:active={activeTab === 'menu'} 
+        on:click={() => activeTab = 'menu'}
+        aria-label="Menu">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+
+      <!-- 3. More Button (Dots) -->
+      <button 
+        class="nav-btn" 
+        class:active={activeTab === 'more'} 
+        on:click={() => activeTab = 'more'}
+        aria-label="More">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="2"></circle>
+          <circle cx="19" cy="12" r="2"></circle>
+          <circle cx="5" cy="12" r="2"></circle>
+        </svg>
+      </button>
     </nav>
   </aside>
 
-  <section class="content">
-    <header class="glass-header">
-      <h1>My Library</h1>
-      <div class="user-profile">
-        <div class="avatar">K</div>
-      </div>
-    </header>
-
-    <div class="scroll-container">
-      <div class="add-book-container glass">
-        <input
-          type="text"
-          bind:value={bookTitle}
-          placeholder="Type a book title to add..."
-          on:keydown={(e) => e.key === "Enter" && addBook()}
-        />
-        <button on:click={addBook}>Add</button>
-      </div>
-
-      <div class="grid">
-        {#each books as book}
-          <div class="book-card glass">
-            <div class="cover-wrapper">
-              <img src={book.cover} alt={book.title} />
-            </div>
-            <div class="info">
-              <h3>{book.title}</h3>
-              <p class="author">{book.author}</p>
-            </div>
-          </div>
-        {/each}
+  <!-- Main Content Stage -->
+  <section class="orb-stage">
+    <div class="orb-floater" style="transform: translateY({$orbY}px)">
+      <div class="orb {isPulsing ? 'pulsing' : ''}">
+        <div class="glass-capsule">
+          <input 
+            type="text" 
+            bind:value={bookTitle} 
+            placeholder="What are you reading?"
+            on:input={handleInput}
+            on:keydown={handleKeydown}
+            on:focus={handleFocus}
+            on:blur={handleBlur}
+          />
+        </div>
       </div>
     </div>
   </section>
 </main>
 
 <style>
+  /* ============================================ */
+  /* GLOBAL STYLES                                */
+  /* ============================================ */
   :global(body) {
     margin: 0;
-    padding: 0;
-    font-family: 'Segoe UI', 'Inter', sans-serif;
-    background-color: #fcfbf9; /* Creamy base */
-    color: #4a4a4a;
-    overflow: hidden; /* Prevent body scroll */
-  }
-
-  main {
-    display: flex;
+    background: linear-gradient(180deg, #FFF8F3 0%, #DEAA84 100%);
+    min-height: 100vh;
     height: 100vh;
-    width: 100vw;
-    position: relative;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
   }
 
-  /* --- Ambient Background Blobs (Essential for Glass Effect) --- */
-  .ambient-light {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(80px);
-    z-index: -1;
-    opacity: 0.6;
-    animation: float 20s infinite ease-in-out alternate;
-  }
-  .one {
-    width: 500px;
-    height: 500px;
-    background: #e8d5b5; /* Warm beige/sand */
-    top: -100px;
-    left: -100px;
-  }
-  .two {
-    width: 600px;
-    height: 600px;
-    background: #dbece5; /* Soft sage/mint */
-    bottom: -150px;
-    right: -100px;
-    animation-delay: -5s;
+  main { 
+    display: flex; 
+    height: 100vh; 
+    width: 100vw; 
+    position: relative; 
   }
 
-  @keyframes float {
-    0% { transform: translate(0, 0); }
-    100% { transform: translate(30px, 50px); }
+  /* ============================================ */
+  /* AMBIENT EFFECTS                              */
+  /* ============================================ */
+  .ambient-light { 
+    position: absolute; 
+    border-radius: 50%; 
+    filter: blur(80px); 
+    opacity: 0.4; 
+    z-index: 0; 
+    animation: floatBlob 20s infinite ease-in-out alternate; 
+  }
+  .one { width: 600px; height: 600px; background: #ffffff; top: -200px; left: -100px; }
+  .two { width: 500px; height: 500px; background: #ffd1bc; bottom: -150px; right: -100px; }
+
+  @keyframes floatBlob { 
+    0% { transform: translate(0, 0); } 
+    100% { transform: translate(40px, 60px); } 
   }
 
-  /* --- Glassmorphism Base Class --- */
-  .glass {
-    background: rgba(255, 255, 255, 0.45); /* Very translucent white */
-    backdrop-filter: blur(16px) saturate(180%); /* The frost effect */
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.6); /* Subtle highlight border */
-    box-shadow: 0 8px 32px 0 rgba(156, 156, 156, 0.1); /* Soft shadow */
-  }
-
-  /* --- Sidebar --- */
-  .sidebar {
-    width: 240px;
+  /* ============================================ */
+  /* SIDEBAR NAVIGATION                           */
+  /* ============================================ */
+  .sidebar { 
+    width: 80px; 
+    height: 100%;
+    position: relative; 
+    z-index: 10; 
     display: flex;
     flex-direction: column;
-    padding: 2rem;
-    border-radius: 0 24px 24px 0; /* Rounded only on right */
-    z-index: 10;
-  }
-  .brand h2 {
-    font-size: 1.8rem;
-    color: #333;
-    margin-bottom: 3rem;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-  }
-  nav a {
-    display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    margin-bottom: 8px;
-    border-radius: 12px;
+    justify-content: center; 
+  }
+
+  .line { 
+    position: absolute; 
+    right: 0; 
+    top: 10%; 
+    bottom: 10%; 
+    width: 2px; 
+    background: rgba(41, 32, 27, 0.2); 
+  }
+
+  .nav-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 32px; 
+    align-items: center;
+    margin-right: 12px; 
+  }
+
+  .nav-btn {
+    background: transparent;
+    border: none;
     cursor: pointer;
-    color: #555;
-    font-weight: 500;
+    color: rgba(94, 75, 75, 0.4); 
+    padding: 8px; /* Adds clickable area */
     transition: all 0.2s ease;
-  }
-  nav a:hover {
-    background: rgba(255, 255, 255, 0.6);
-    transform: translateX(5px);
-  }
-  nav a.active {
-    background: rgba(255, 255, 255, 0.8);
-    color: #000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  }
-  .spacer { flex: 1; }
-
-  /* --- Main Content --- */
-  .content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 0 2rem 2rem 2rem;
-  }
-
-  .glass-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.5rem 0;
-    margin-bottom: 1rem;
-  }
-  .glass-header h1 {
-    font-size: 1.6rem;
-    font-weight: 600;
-    color: #333;
-  }
-  .avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: #333;
-    color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: bold;
   }
 
-  .scroll-container {
-    flex: 1;
-    overflow-y: auto;
-    padding-right: 10px;
+  .nav-btn:hover {
+    color: rgba(94, 75, 75, 0.8);
+    transform: scale(1.1);
   }
 
-  /* --- Add Book Section --- */
-  .add-book-container {
-    display: flex;
-    gap: 10px;
-    padding: 1.2rem;
-    border-radius: 20px;
-    margin-bottom: 2.5rem;
+  /* Active State Styling */
+  .nav-btn.active {
+    color: #5e4b4b; 
   }
-  input {
-    flex: 1;
-    border: none;
-    background: rgba(255, 255, 255, 0.5);
-    padding: 12px 16px;
-    border-radius: 12px;
-    font-size: 1rem;
-    outline: none;
-    color: #333;
-    transition: background 0.2s;
-  }
-  input:focus {
-    background: rgba(255, 255, 255, 0.8);
-    box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
-  }
-  button {
-    padding: 10px 24px;
-    border-radius: 12px;
-    border: none;
-    background: #333;
-    color: #fff;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.1s;
-  }
-  button:active { transform: scale(0.96); }
 
-  /* --- Grid --- */
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 24px;
+  /* ============================================ */
+  /* ORB & INPUT STAGE                            */
+  /* ============================================ */
+  .orb-stage { 
+    flex: 1; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    position: relative; 
+    z-index: 5; 
+  }
+
+  .orb-floater { 
+    width: 780px; 
+    height: 780px; 
+    margin-left: -200px; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    will-change: transform; 
+    transform: translateZ(0); 
+  }
+
+  .orb {
+    width: 100%; 
+    height: 100%; 
+    border-radius: 50%;
+    background: linear-gradient(180deg, rgb(255, 204, 146) 0%, rgba(250, 194, 147, 0.9) 60%, rgba(203, 189, 255, 0.7) 90%);
+    box-shadow: inset 2px 4px 20px rgba(255, 255, 255, 0.6), inset -2px -4px 30px rgba(0, 0, 0, 0.05), 0 25px 60px rgba(219, 168, 172, 0.35);        
+    display: flex; 
+    justify-content: center; 
+    align-items: center;
+    transform: scale(1); 
+    transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1); 
+  }
+
+  .orb.pulsing { transform: scale(1.015); }
+
+  .glass-capsule { 
+    background: rgba(255, 255, 255, 0.3); 
+    backdrop-filter: blur(16px); 
+    -webkit-backdrop-filter: blur(16px); 
+    padding: 18px 36px; 
+    border-radius: 100px; 
+    border: 1px solid rgba(255, 255, 255, 0.5); 
+    box-shadow: 0 8px 32px rgba(0,0,0,0.05); 
+    width: 340px; 
+    transition: all 0.3s ease; 
+    z-index: 20; 
+    will-change: transform; 
+  }
+
+  .glass-capsule:focus-within { 
+    transform: scale(1.03); 
+    background: rgba(255, 255, 255, 0.45); 
+    box-shadow: 0 12px 40px rgba(0,0,0,0.08); 
+  }
+
+  input { 
+    width: 100%; 
+    background: transparent; 
+    border: none; 
+    outline: none; 
+    font-size: 1.2rem; 
+    color: #5e4b4b; 
+    text-align: center; 
+    font-weight: 500; 
+    font-family: 'Inter', sans-serif; 
   }
   
-  .book-card {
-    padding: 16px;
-    border-radius: 20px;
-    display: flex;
-    flex-direction: column;
+  input::placeholder { 
+    color: rgba(94, 75, 75, 0.45); 
+    font-weight: 400; 
+  }
+
+  /* ============================================ */
+  /* TITLEBAR & EXIT BUTTON                       */
+  /* ============================================ */
+  .titlebar {
+    height: 40px; 
+    width: 100vw; 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    z-index: 9999;
+    cursor: default; 
+    pointer-events: auto;
+    display: flex; 
+    justify-content: flex-end; 
     align-items: center;
-    text-align: center;
-    transition: transform 0.2s, box-shadow 0.2s;
+    padding-right: 20px;
+    box-sizing: border-box;
   }
-  .book-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-    background: rgba(255, 255, 255, 0.65);
+
+  .exit-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: rgba(41, 32, 27, 0.4); 
+    padding: 8px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    -webkit-app-region: no-drag; 
   }
-  .cover-wrapper {
-    width: 120px;
-    height: 180px;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
-    margin-bottom: 16px;
-  }
-  .cover-wrapper img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .book-card h3 {
-    margin: 0.5rem 0 0.2rem 0;
-    font-size: 1rem;
-    color: #222;
-  }
-  .book-card .author {
-    margin: 0;
-    font-size: 0.85rem;
-    color: #777;
+
+  .exit-btn:hover {
+    background: rgba(41, 32, 27, 0.1);
+    color: rgba(41, 32, 27, 0.8);
+    transform: scale(1.1);
   }
 </style>

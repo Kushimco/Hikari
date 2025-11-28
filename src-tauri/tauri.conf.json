@@ -13,13 +13,13 @@
     "windows": [
       {
         "title": "Hikari",
-        "width": 1200,
-        "height": 800,
-        "resizable": true,
+        "width": 1440,
+        "height": 960,
+        "resizable": false,
         "fullscreen": false,
         "center": true,
-        "decorations": true,
-        "transparent": false
+        "decorations": false,
+        "transparent": true 
       }
     ],
     "security": {
