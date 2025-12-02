@@ -150,7 +150,7 @@
 
   .orb {
     width: 100%; height: 100%; border-radius: 50%;
-    background: linear-gradient(180deg, rgb(255, 204, 146) 0%, rgba(250, 194, 147, 0.9) 60%, rgba(203, 189, 255, 0.7) 90%);
+    background: linear-gradient(180deg, rgb(254, 214, 169) 0%, rgba(244, 202, 167, 0.9) 60%, rgba(255, 189, 245, 0.7) 90%);
     box-shadow: inset 2px 4px 20px rgba(255, 255, 255, 0.6), inset -2px -4px 30px rgba(0, 0, 0, 0.05), 0 25px 60px rgba(219, 168, 172, 0.35);        
     display: flex; justify-content: center; align-items: center;
     
@@ -166,7 +166,11 @@
     max-height: 780px;
   }
   
-  .orb.pulsing { transform: scale(1.015); }
+  .orb.pulsing, 
+  .orb.listening.pulsing { 
+    transform: scale(1.03); 
+    transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1); 
+  }
 
   /* LISTENING STATE (Glow + Slow Spring) */
   .orb.listening {
@@ -202,6 +206,12 @@
     box-sizing: border-box;
     overflow-y: auto;    
     cursor: default;
+    scrollbar-width: none;  /* Firefox */
+    -ms-overflow-style: none;
+  }
+
+  .orb.expanded::-webkit-scrollbar {
+    display: none;
   }
 
   .glass-capsule { 
