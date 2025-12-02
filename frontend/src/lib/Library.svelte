@@ -17,7 +17,7 @@
 
 <style>
   .library-content {
-    animation: fadeIn 0.5s ease 0.3s forwards;
+    animation: fadeIn 0.5s ease 0.5s forwards;
     opacity: 0; 
     color: #5e4b4b;
     height: 100%;
