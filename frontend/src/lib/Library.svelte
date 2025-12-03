@@ -1,13 +1,26 @@
 <script lang="ts">
-  // Mock Data for UI development
-  let books = [
-    { id: 1, title: "The Design of Everyday Things", author: "Don Norman", coverColor: "#FF9A9E", status: "reading" },
-    { id: 2, title: "Clean Code", author: "Robert C. Martin", coverColor: "#A18CD1", status: "finished" },
-    { id: 3, title: "Dune", author: "Frank Herbert", coverColor: "#FBC2EB", status: "to-read" },
-    { id: 4, title: "Atomic Habits", author: "James Clear", coverColor: "#84FAB0", status: "reading" },
-    { id: 5, title: "Neuromancer", author: "William Gibson", coverColor: "#E0C3FC", status: "finished" },
-    { id: 6, title: "Sapiens", author: "Yuval Noah Harari", coverColor: "#4FACFE", status: "to-read" },
-  ];
+  import { invoke } from '@tauri-apps/api/core';
+  import { onMount } from 'svelte';
+
+  type Book = {
+    id: string;
+    title: string;
+    author: string;
+    cover: string;
+    cover_color: string; 
+    status: string;
+  };
+
+  let books: Book[] = [];
+  onMount(async () => {
+    try {
+      console.log("Fetching books from Library...");
+      books = await invoke('get_books');
+      console.log("Loaded:", books);
+    } catch (err) {
+      console.error("Failed to load books:", err);
+    }
+  });
 </script>
 
 <div class="library-content">
@@ -23,18 +36,21 @@
   <div class="book-grid">
     {#each books as book}
       <div class="book-card">
-        <!-- Book Cover Placeholder -->
-        <div class="cover" style="background: linear-gradient(135deg, {book.coverColor} 0%, white 200%);">
+        <div class="cover" style="background: linear-gradient(135deg, {book.cover_color || '#FF9A9E'} 0%, white 200%);">
           <span class="status-dot {book.status}"></span>
         </div>
-        
-        <!-- Book Info -->
         <div class="info">
           <h3 class="title">{book.title}</h3>
           <p class="author">{book.author}</p>
         </div>
       </div>
     {/each}
+  
+    {#if books.length === 0}
+      <div class="empty-state">
+        <p>No books found. Add one!</p>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -43,13 +59,20 @@
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
 
   .library-content {
-    /* Animation delay to sync with Orb expansion */
     animation: fadeIn 0.6s ease 0.6s forwards; 
     opacity: 0; 
     color: #5e4b4b;
     height: 100%;
     width: 100%;
-    padding-bottom: 40px; /* Space for scrolling */
+    padding-bottom: 40px;
+  }
+
+  .empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px;
+    color: rgba(94, 75, 75, 0.5);
+    font-style: italic;
   }
 
   /* --- Header & Filters --- */
@@ -62,11 +85,11 @@
 
   h2 {
     margin: 0;
-    font-family: 'Playfair Display', serif; /* NEW FONT */
-    font-size: 2.5rem; /* Larger for impact */
+    font-family: 'Playfair Display', serif;
+    font-size: 2.5rem;
     font-weight: 600;
     letter-spacing: -0.5px;
-    color: #4a3b3b; /* Dark, warm brown */
+    color: #4a3b3b;
   }
 
   .filters {
@@ -97,10 +120,9 @@
   /* --- Grid Layout --- */
   .book-grid {
     display: grid;
-    /* Responsive columns: roughly 140px wide min */
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 24px;
-    padding-right: 10px; /* Avoid scrollbar overlap */
+    padding-right: 10px;
   }
 
   /* --- Card Styles --- */
@@ -117,18 +139,18 @@
   }
 
   .cover {
-    aspect-ratio: 2 / 3; /* Standard book ratio */
+    aspect-ratio: 2 / 3;
     width: 100%;
     border-radius: 12px;
     position: relative;
     box-shadow: 
       0 4px 10px rgba(0,0,0,0.05),
       0 10px 20px rgba(0,0,0,0.03),
-      inset 0 0 0 1px rgba(255,255,255,0.2); /* Subtle inner border */
+      inset 0 0 0 1px rgba(255,255,255,0.2);
     overflow: hidden;
   }
 
-  /* Status Dot (Reading/Finished) */
+  /* Status Dot */
   .status-dot {
     position: absolute;
     top: 10px; right: 10px;
@@ -136,21 +158,20 @@
     border-radius: 50%;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   }
-  .status-dot.reading { background: #4ade80; } /* Green */
-  .status-dot.finished { background: #60a5fa; } /* Blue */
-  .status-dot.to-read { background: #cbd5e1; } /* Grey */
+  .status-dot.reading { background: #47f386; } 
+  .status-dot.finished { background: #529ffd; } 
+  .status-dot.to-read { background: #ff4eaf; } 
 
   /* Text Info */
   .info { padding: 0 4px; }
 
   .title {
-    font-family: 'Playfair Display', serif; /* NEW FONT */
+    font-family: 'Playfair Display', serif;
     font-size: 1.1rem;
     font-weight: 600;
     color: #2c1810;
     margin: 0 0 4px 0;
     line-height: 1.2;
-    /* Truncate text after 2 lines */
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -163,7 +184,7 @@
     font-weight: 500;
     color: rgba(94, 75, 75, 0.65);
     letter-spacing: 0.03em;
-    text-transform: uppercase; 
+    text-transform: uppercase;
     margin: 0;
   }
 
