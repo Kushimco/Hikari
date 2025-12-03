@@ -12,14 +12,31 @@
   let isPulsing = false;
   let isFocused = false; 
   let activeTab = 'home';
+  let isFlashing = false;
 
-  function handleInput() {
-    isPulsing = true;
-    setTimeout(() => isPulsing = false, 100);
+  // Derived: should the orb scale up because user is focused on Home?
+  $: shouldScale = isFocused && activeTab === 'home';
+
+  // Flash (glow only) when going to Library
+  $: if (activeTab === 'menu') {
+    isFlashing = true;
+    setTimeout(() => (isFlashing = false), 1500);
   }
 
-  function handleFocus() { isFocused = true; }
-  function handleBlur() { isFocused = false; }
+  function handleInput() {
+    if (activeTab !== 'home') return;
+    isPulsing = true;
+    // Reset pulse quickly for the "bounce" effect
+    setTimeout(() => (isPulsing = false), 100);
+  }
+
+  function handleFocus() {
+    if (activeTab === 'home') isFocused = true;
+  }
+
+  function handleBlur() {
+    isFocused = false;
+  }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && bookTitle.trim()) {
@@ -50,12 +67,17 @@
       class:expanded-floater={activeTab === 'menu'} 
       class:focused={isFocused}
     >
-      <!-- Added class:listening for the glow effect -->
+      <!-- 
+         Class Order Matters for CSS specificity!
+         typing-scale: Base scale (1.02)
+         pulsing: Pulse scale (1.04) - Needs to override typing-scale
+      -->
       <div 
         class="orb" 
         class:expanded={activeTab === 'menu'} 
-        class:pulsing={isPulsing}
-        class:listening={isFocused && activeTab === 'home'} 
+        class:listening={(isFocused && activeTab === 'home') || isFlashing}
+        class:typing-scale={shouldScale}
+        class:pulsing={isPulsing && activeTab === 'home'}
       >
         {#if activeTab === 'home'}
           <div class="glass-capsule">
@@ -98,7 +120,6 @@
     100% { transform: translate(40px, 60px); } 
   }
 
-  /* FIXED FLOAT ANIMATION: Start/End at 0 to prevent snapping */
   @keyframes float {
     0% { transform: translateY(0px); }
     25% { transform: translateY(-12px); }
@@ -117,8 +138,8 @@
     align-items: center; 
     will-change: transform; 
     
-    animation: float 8s ease-in-out infinite; /* Slower float (6s -> 8s) */
-    animation-delay: 0s; /* No delay needed now that it starts at 0 */
+    animation: float 8s ease-in-out infinite; 
+    animation-delay: 0s; 
 
     transition: 
       transform 1.5s cubic-bezier(0.25, 1, 0.5, 1),
@@ -149,13 +170,22 @@
   }
 
   .orb {
-    width: 100%; height: 100%; border-radius: 50%;
+    width: 100%; 
+    height: 100%; 
+    border-radius: 50%;
     background: linear-gradient(180deg, rgb(254, 214, 169) 0%, rgba(244, 202, 167, 0.9) 60%, rgba(255, 189, 245, 0.7) 90%);
     box-shadow: inset 2px 4px 20px rgba(255, 255, 255, 0.6), inset -2px -4px 30px rgba(0, 0, 0, 0.05), 0 25px 60px rgba(219, 168, 172, 0.35);        
-    display: flex; justify-content: center; align-items: center;
+    display: flex; 
+    justify-content: center; 
+    align-items: center;
     
+    /* 
+       TRANSITIONS:
+       Note we separate 'transform' to be fast (0.1s) for typing pulses.
+    */
     transition: 
-      box-shadow 0.5s ease, /* Add this for glow */
+      box-shadow 1.2s ease,
+      filter 1.2s ease,
       transform 0.1s cubic-bezier(0.4, 0, 0.2, 1),
       width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
@@ -166,33 +196,33 @@
     max-height: 780px;
   }
   
-  .orb.pulsing, 
-  .orb.listening.pulsing { 
-    transform: scale(1.03); 
-    transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1); 
-  }
-
-  /* LISTENING STATE (Glow + Slow Spring) */
+  /* 1. LISTENING: GLOW ONLY (No Transform) */
   .orb.listening {
     box-shadow: 
-      /* Layer 1: Bright white inner rim (simulates light hitting the glass) */
       inset 0 0 30px rgba(255, 255, 255, 0.9),
-      
-      /* Layer 2: Strong outer glow (The main shine) */
       0 0 120px rgba(255, 220, 180, 0.8),
-      
-      /* Layer 3: Very wide, faint ambient glow */
       0 0 200px rgba(255, 200, 150, 0.4);
     
-    /* Make the background slightly lighter to look "lit up" */
     filter: brightness(1.05);
 
+    /* Keep transform OFF here to avoid conflict */
     transition: 
-      box-shadow 0.4s ease-out,
-      filter 0.4s ease-out,
-      transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-      
-    transform: scale(1.02); 
+      box-shadow 0.3s ease-out,
+      filter 0.3s ease-out,
+      width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+      height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+      border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+      background 1.5s ease;
+  }
+
+  .orb.typing-scale {
+    transform: scale(1.02);
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .orb.pulsing { 
+    transform: scale(1.05) !important; 
+    transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1); 
   }
 
   .orb.expanded {
@@ -206,8 +236,11 @@
     box-sizing: border-box;
     overflow-y: auto;    
     cursor: default;
-    scrollbar-width: none;  /* Firefox */
+    scrollbar-width: none;
     -ms-overflow-style: none;
+
+    /* Force neutral scale during Library view */
+    transform: scale(1) !important; 
   }
 
   .orb.expanded::-webkit-scrollbar {
@@ -233,21 +266,47 @@
     box-shadow: 0 12px 40px rgba(0,0,0,0.08); 
   }
 
-  input { width: 100%; background: transparent; border: none; outline: none; font-size: 1.2rem; color: #5e4b4b; text-align: center; font-weight: 500; font-family: 'Inter', sans-serif; }
+  input { 
+    width: 100%; 
+    background: transparent; 
+    border: none; 
+    outline: none; 
+    font-size: 1.2rem; 
+    color: #5e4b4b; 
+    text-align: center; 
+    font-weight: 500; 
+    font-family: 'Inter', sans-serif; 
+  }
   input::placeholder { color: rgba(94, 75, 75, 0.45); font-weight: 400; }
 
   .titlebar {
-    height: 40px; width: 100vw; position: fixed; top: 0; left: 0; z-index: 9999;
-    cursor: default; pointer-events: auto;
-    display: flex; justify-content: flex-end; align-items: center;
-    padding-right: 20px; box-sizing: border-box;
+    height: 40px; 
+    width: 100vw; 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    z-index: 9999;
+    cursor: default; 
+    pointer-events: auto;
+    display: flex; 
+    justify-content: flex-end; 
+    align-items: center;
+    padding-right: 20px; 
+    box-sizing: border-box;
   }
 
   .exit-btn {
-    background: transparent; border: none; cursor: pointer;
-    color: rgba(41, 32, 27, 0.4); padding: 8px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s ease; -webkit-app-region: no-drag; 
+    background: transparent; 
+    border: none; 
+    cursor: pointer;
+    color: rgba(41, 32, 27, 0.4); 
+    padding: 8px; 
+    border-radius: 50%;
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+    transition: all 0.2s ease; 
+    -webkit-app-region: no-drag; 
   }
 
   .exit-btn:hover {
