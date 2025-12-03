@@ -12,16 +12,9 @@
   let isPulsing = false;
   let isFocused = false; 
   let activeTab = 'home';
-  let isFlashing = false;
-
+  
   // Derived: should the orb scale up because user is focused on Home?
   $: shouldScale = isFocused && activeTab === 'home';
-
-  // Flash (glow only) when going to Library
-  $: if (activeTab === 'menu') {
-    isFlashing = true;
-    setTimeout(() => (isFlashing = false), 1500);
-  }
 
   function handleInput() {
     if (activeTab !== 'home') return;
@@ -68,14 +61,14 @@
       class:focused={isFocused}
     >
       <!-- 
-         Class Order Matters for CSS specificity!
-         typing-scale: Base scale (1.02)
-         pulsing: Pulse scale (1.04) - Needs to override typing-scale
+         Class Logic:
+         - listening: Active ONLY on Home focus (typing glow)
+         - expanded: Active on Library (library glow)
       -->
       <div 
         class="orb" 
         class:expanded={activeTab === 'menu'} 
-        class:listening={(isFocused && activeTab === 'home') || isFlashing}
+        class:listening={isFocused && activeTab === 'home'}
         class:typing-scale={shouldScale}
         class:pulsing={isPulsing && activeTab === 'home'}
       >
@@ -179,10 +172,7 @@
     justify-content: center; 
     align-items: center;
     
-    /* 
-       TRANSITIONS:
-       Note we separate 'transform' to be fast (0.1s) for typing pulses.
-    */
+    /* Base transition (Fast transforms for typing) */
     transition: 
       box-shadow 1.2s ease,
       filter 1.2s ease,
@@ -196,7 +186,7 @@
     max-height: 780px;
   }
   
-  /* 1. LISTENING: GLOW ONLY (No Transform) */
+  /* 1. LISTENING (Home Typing): Glow Only */
   .orb.listening {
     box-shadow: 
       inset 0 0 30px rgba(255, 255, 255, 0.9),
@@ -205,7 +195,6 @@
     
     filter: brightness(1.05);
 
-    /* Keep transform OFF here to avoid conflict */
     transition: 
       box-shadow 0.3s ease-out,
       filter 0.3s ease-out,
@@ -215,16 +204,19 @@
       background 1.5s ease;
   }
 
+  /* 2. TYPING SCALE */
   .orb.typing-scale {
     transform: scale(1.02);
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
+  /* 3. PULSING (Bounce) */
   .orb.pulsing { 
     transform: scale(1.05) !important; 
     transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1); 
   }
 
+  /* 4. EXPANDED (Library): Glow with DELAY */
   .orb.expanded {
     border-radius: 40px; 
     width: 100%;          
@@ -239,8 +231,31 @@
     scrollbar-width: none;
     -ms-overflow-style: none;
 
-    /* Force neutral scale during Library view */
+    /* Force neutral scale */
     transform: scale(1) !important; 
+
+    /* The Glow Logic (Same as listening) */
+    box-shadow: 
+      inset 0 0 30px rgba(255, 255, 255, 0.9),
+      0 0 120px rgba(255, 220, 180, 0.8),
+      0 0 200px rgba(255, 200, 150, 0.4);
+    filter: brightness(1.05);
+
+    /* 
+       KEY CHANGE: 
+       Added 0.3s delay to box-shadow and filter.
+       This means the shape starts morphing immediately (0s), 
+       but the glow waits 0.3s before fading in.
+    */
+    transition: 
+        transform 0s, 
+        width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+        height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+        border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
+        background 1.5s ease,
+        /* DELAYED GLOW */
+        box-shadow 1.5s ease-in-out 0.3s,
+        filter 1.5s ease-in-out 0.3s;
   }
 
   .orb.expanded::-webkit-scrollbar {
