@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
-// Explicitly import the traits needed for JSON conversion
+use chrono::Utc;
 use serde::{Serialize, Deserialize}; 
 
 
@@ -13,6 +13,7 @@ pub struct Book {
     pub cover: String,
     pub cover_color: String,
     pub status: String,
+    pub date_added: String,
 }
 
 fn get_db_path(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -46,6 +47,7 @@ fn add_book(app: tauri::AppHandle, title: String, author: String, cover: String)
         cover,
         cover_color: "#FF9A9E".to_string(), 
         status: "to-read".to_string(),
+        date_added: Utc::now().to_rfc3339(),
     };
     
     books.push(new_book.clone());
