@@ -82,6 +82,32 @@ fn update_book_status(app: tauri::AppHandle, id: String, status: String) -> Resu
     Ok(())
 }
 
+#[tauri::command]
+fn delete_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let path = get_db_path(&app);
+    
+    if !path.exists() {
+        return Err("Library file not found".to_string());
+    }
+
+    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut books: Vec<Book> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+
+    // Remove the book
+    let initial_len = books.len();
+    books.retain(|b| b.id != id);
+
+    if books.len() == initial_len {
+        return Err("Book not found".to_string());
+    }
+
+    // Save updated list
+    let new_data = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
+    fs::write(path, new_data).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -95,7 +121,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_books, add_book, update_book_status])
+        .invoke_handler(tauri::generate_handler![get_books, add_book, update_book_status, delete_book])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
