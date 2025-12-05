@@ -31,11 +31,29 @@
 
   let currentIndex = 0;
   let direction: "next" | "prev" = "next";
+  let prevBooksRef: MockBook[] = [];
 
-  // Reset to first book when new results arrive
-  $: if (books && books.length > 0 && currentIndex >= books.length) {
+  const DOT_COUNT = 3;
+  const dots = Array.from({ length: DOT_COUNT }, (_, i) => i);
+
+  // Reset index to 0 whenever a new list instance comes in
+  $: if (books !== prevBooksRef) {
     currentIndex = 0;
+    prevBooksRef = books;
   }
+
+  // Prev / next availability for fading arrows
+  $: canGoPrev = books.length > 1 && currentIndex > 0;
+  $: canGoNext = books.length > 1 && currentIndex < books.length - 1;
+
+  // Dots: left = first, right = last, middle = any book in between
+  $: activeDotIndex = (() => {
+    const len = books.length;
+    if (!len) return 1;
+    if (currentIndex === 0) return 0;
+    if (currentIndex === len - 1) return 2;
+    return 1;
+  })();
 
   $: currentBook = books.length ? books[currentIndex] : null;
 
@@ -68,31 +86,31 @@
   }
 
   function goNext() {
-    if (!books.length) return;
+    if (!books.length || !canGoNext) return;
     direction = "next";
-    currentIndex = (currentIndex + 1) % books.length;
+    currentIndex = currentIndex + 1;
   }
 
   function goPrev() {
-    if (!books.length) return;
+    if (!books.length || !canGoPrev) return;
     direction = "prev";
-    currentIndex = (currentIndex - 1 + books.length) % books.length;
+    currentIndex = currentIndex - 1;
   }
 </script>
 
 {#if searchState === "result" && currentBook}
   <div class="carousel-shell">
     <div class="carousel-row">
-      {#if books.length > 1}
-        <button
-          type="button"
-          class="nav-bubble nav-bubble-left"
-          on:click={goPrev}
-          aria-label="Previous result"
-        >
-          ‹
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="nav-bubble nav-bubble-left"
+        class:nav-hidden={!canGoPrev}
+        on:click={goPrev}
+        aria-label="Previous result"
+        disabled={!canGoPrev}
+      >
+        ‹
+      </button>
 
       {#key currentBook.title + currentIndex}
         <div
@@ -130,29 +148,27 @@
             </div>
           </div>
 
-          {#if books.length > 1}
-            <div class="dot-row">
-              {#each books as _b, i}
-                <span
-                  class="dot"
-                  class:dot-active={i === currentIndex}
-                ></span>
-              {/each}
-            </div>
-          {/if}
+          <div class="dot-row">
+            {#each dots as i}
+              <span
+                class="dot"
+                class:dot-active={i === activeDotIndex}
+              ></span>
+            {/each}
+          </div>
         </div>
       {/key}
 
-      {#if books.length > 1}
-        <button
-          type="button"
-          class="nav-bubble nav-bubble-right"
-          on:click={goNext}
-          aria-label="Next result"
-        >
-          ›
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="nav-bubble nav-bubble-right"
+        class:nav-hidden={!canGoNext}
+        on:click={goNext}
+        aria-label="Next result"
+        disabled={!canGoNext}
+      >
+        ›
+      </button>
     </div>
 
     <div class="carousel-footer">
@@ -195,7 +211,6 @@
 {/if}
 
 <style>
-  /* Carousel shell sized to sit nicely inside orb */
   .carousel-shell {
     width: 420px;
     max-width: 100%;
@@ -218,7 +233,6 @@
     position: relative;
   }
 
-  /* Navigation bubbles */
   .nav-bubble {
     width: 40px;
     height: 40px;
@@ -235,14 +249,21 @@
     cursor: pointer;
     box-shadow: 0 10px 25px rgba(181, 119, 83, 0.25);
     transition:
+      opacity 0.18s ease,
       background 0.2s ease,
       transform 0.15s ease,
       box-shadow 0.2s ease;
+    opacity: 1;
   }
 
-  .nav-bubble:hover {
+  .nav-bubble:hover:not(.nav-hidden) {
     background: rgba(255, 255, 255, 0.32);
     transform: translateY(-1px);
+  }
+
+  .nav-hidden {
+    opacity: 0;
+    pointer-events: none;
   }
 
   .nav-bubble-left {
@@ -253,14 +274,13 @@
     justify-self: flex-end;
   }
 
-  /* Card */
   .book-card {
     display: flex;
     gap: 20px;
-    align-items: center; /* center cover + text vertically */
+    align-items: center;
     background: rgba(255, 255, 255, 0.3);
     border-radius: 24px;
-    padding: 22px 24px;  /* a bit more vertical padding */
+    padding: 22px 24px;
     border: 1px solid rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
@@ -320,7 +340,6 @@
     color: rgba(75, 51, 46, 0.7);
   }
 
-  /* Description: clamp to 2 lines so layout stays stable */
   .book-summary-button {
     margin: 6px 0 0;
     padding: 0;
@@ -332,11 +351,10 @@
     font-size: 0.92rem;
     line-height: 1.4;
     color: rgba(75, 51, 46, 0.8);
-
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2; /* WebKit / legacy Safari */
-    line-clamp: 2;          /* standard property */
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
   }
 
@@ -346,7 +364,6 @@
     outline: none;
   }
 
-  /* Little dots under card */
   .dot-row {
     display: flex;
     justify-content: center;
@@ -366,7 +383,6 @@
     box-shadow: 0 0 10px rgba(181, 119, 83, 0.7);
   }
 
-  /* Footer buttons */
   .carousel-footer {
     display: flex;
     gap: 12px;
@@ -406,7 +422,6 @@
     background: rgba(255, 255, 255, 0.16);
   }
 
-  /* Slide animations for next/prev */
   .slide-next {
     animation: slideNext 0.25s ease-out;
   }
@@ -470,7 +485,6 @@
     }
   }
 
-  /* Existing glass / loader styles */
   .glass-capsule {
     background: rgba(255, 255, 255, 0.3);
     backdrop-filter: blur(16px);

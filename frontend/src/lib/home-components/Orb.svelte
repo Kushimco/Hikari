@@ -33,7 +33,7 @@
   .orb-floater {
     width: 780px;
     height: 780px;
-    margin-left: -160px;
+    margin-left: -105px;
     display: flex;
     justify-content: center;
     align-items: center;

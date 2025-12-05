@@ -31,17 +31,15 @@
     coverUrl?: string | null;
   };
 
-  // Top N search results
+  const MAX_RESULTS = 10;
+
+  // Current search results (fixed list per search)
   let foundBooks: MockBook[] = [];
 
-  // "Add" and "Done" confirmation animation states (global for now)
   let isAdding = false;
   let isDiscarding = false;
 
-  // Which book’s description is open in the modal (null = closed)
   let summaryBook: MockBook | null = null;
-
-  // Reference to the orb element for smooth float → center transition
   let orbElement: HTMLDivElement | null = null;
 
   // Tab change effects
@@ -81,12 +79,17 @@
     return trimmed + "…";
   }
 
+  function firstSentence(text: string): string {
+    if (!text) return "";
+    const match = text.match(/[^.!?]+[.!?]/);
+    return match ? match[0].trim() : text;
+  }
+
   function cleanDescription(raw: string): string {
     if (!raw) return "";
 
     let text = raw;
 
-    // 1) Strip everything after common separators / meta sections
     const cutMarkers = [
       "Also contained in:",
       "This work has also been published",
@@ -99,16 +102,9 @@
       }
     }
 
-    // 2) Remove inline markdown links: [text](url) -> text
     text = text.replace(/\[(.*?)\]\(.*?\)/g, "$1");
-
-    // 3) Remove reference-style uses like "([source][1])"
     text = text.replace(/\(\[source]\[\d+]\)/gi, "");
-
-    // 4) Remove reference definitions like "[1]: https?:..."
     text = text.replace(/\[\d+]:\s*https?:\/\/\S+/gi, "");
-
-    // 5) Collapse excessive whitespace
     text = text.replace(/\s+/g, " ").trim();
 
     return text;
@@ -124,7 +120,6 @@
 
   $: shouldScale = isFocused && activeTab === "home" && !isReturning;
 
-  // Input interactions (BookSearchModule dispatches CustomEvents)
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
     isPulsing = true;
@@ -142,13 +137,7 @@
     restoreOrbFloat();
   }
 
-  function firstSentence(text: string): string {
-  if (!text) return "";
-  const match = text.match(/[^.!?]+[.!?]/); // up to first ., ! or ?
-  return match ? match[0].trim() : text;
-}
-
-  // Hit Enter to search Open Library (with cover + descriptions) and keep top 3
+  // Fetch up to MAX_RESULTS once when user presses Enter
   async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
     const e = event.detail;
 
@@ -160,14 +149,14 @@
 
     try {
       const res = await fetch(
-        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}`
-      );
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}`
+      ); // limit server-side to 10[web:469]
       if (!res.ok) {
         throw new Error(`Open Library error: ${res.status}`);
       }
 
       const data: any = await res.json();
-      const docs = (data.docs ?? []).slice(0, 3); // top 3 hits
+      const docs: any[] = data.docs ?? [];
 
       if (!docs.length) {
         searchState = "idle";
@@ -177,7 +166,6 @@
       const books: MockBook[] = [];
 
       for (const doc of docs) {
-        // Build cover URL from cover_i or first ISBN
         let coverUrl: string | null = null;
         if (doc.cover_i) {
           coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg?default=false`;
@@ -185,7 +173,6 @@
           coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg?default=false`;
         }
 
-        // Fetch a description from the Work endpoint if available
         let fullSummary = "";
         if (doc.key) {
           try {
@@ -216,7 +203,7 @@
           author: doc.author_name?.[0] ?? "Unknown author",
           year: doc.first_publish_year?.toString() ?? "—",
           pages: doc.number_of_pages_median?.toString() ?? "—",
-          summary: shorten(teaser, 40),
+          summary: shorten(teaser, 120),
           fullSummary: cleaned,
           coverUrl
         });
@@ -268,7 +255,6 @@
   }
 
   function handleOverlayClick(event: MouseEvent) {
-    // Only close when the user clicks on the backdrop, not inside the dialog
     if (event.target !== event.currentTarget) return;
     handleCloseSummary();
   }
@@ -402,7 +388,6 @@
     opacity: 0;
   }
 
-  /* Full summary modal overlay */
   .summary-overlay {
     position: fixed;
     inset: 0;
