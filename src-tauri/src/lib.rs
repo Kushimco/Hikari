@@ -45,7 +45,7 @@ fn get_covers_dir(app_handle: &tauri::AppHandle) -> PathBuf {
 }
 
 /// Download the cover image from `url` into the covers directory and return the local path.
-/// If anything fails, return an Err so the caller can fall back to the URL.[web:816][web:813]
+/// If anything fails, return an Err so the caller can fall back to the URL.
 fn download_cover_image(app: &tauri::AppHandle, url: &str) -> Result<String, String> {
     if url.trim().is_empty() {
         return Err("empty url".into());
@@ -63,7 +63,7 @@ fn download_cover_image(app: &tauri::AppHandle, url: &str) -> Result<String, Str
     let file_name = format!("{}.{}", uuid::Uuid::new_v4(), ext);
     let dest_path = covers_dir.join(file_name);
 
-    // Blocking download is fine in a tauri command.[web:816][web:813]
+    // Blocking download is fine in a tauri command.
     let mut response = reqwest::blocking::get(url).map_err(|e| e.to_string())?;
     let mut file = File::create(&dest_path).map_err(|e| e.to_string())?;
     copy(&mut response, &mut file).map_err(|e| e.to_string())?;
@@ -152,17 +152,35 @@ fn delete_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut books: Vec<Book> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
 
-    let initial_len = books.len();
-    books.retain(|b| b.id != id);
+    // Find the book before deleting it so we can get the cover path
+    if let Some(index) = books.iter().position(|b| b.id == id) {
+        let book = &books[index];
 
-    if books.len() == initial_len {
-        return Err("Book not found".to_string());
+        // Check if cover is a local file (not a web URL) and delete it
+        if !book.cover.starts_with("http") && !book.cover.is_empty() {
+            let cover_path = std::path::Path::new(&book.cover);
+            if cover_path.exists() {
+                // Attempt to remove the file
+                // We print errors but don't fail the whole request if deletion fails
+                if let Err(e) = std::fs::remove_file(cover_path) {
+                    println!("Warning: Failed to delete cover file: {}", e);
+                } else {
+                    println!("Deleted cover file: {:?}", cover_path);
+                }
+            }
+        }
+
+        // Now remove the book from the list
+        books.remove(index);
+
+        // Save the updated library
+        let new_data = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
+        fs::write(path, new_data).map_err(|e| e.to_string())?;
+        
+        Ok(())
+    } else {
+        Err("Book not found".to_string())
     }
-
-    let new_data = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
-    fs::write(path, new_data).map_err(|e| e.to_string())?;
-
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
