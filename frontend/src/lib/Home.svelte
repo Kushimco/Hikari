@@ -4,11 +4,12 @@
   import Background from './home-components/Background.svelte';
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
-  import { invoke } from '@tauri-apps/api/core'; 
+  import { invoke } from '@tauri-apps/api/core';
+  import { fade, scale } from 'svelte/transition'; // Import transitions
 
   // UI state
   let bookTitle = "";
-  let isPulsing = false;
+  let isPulsing = false; // This triggers the orb glow up
   let isFocused = false;
   let activeTab: "home" | "menu" = "home";
   let previousTab: "home" | "menu" = activeTab;
@@ -40,6 +41,7 @@
     cover_color: string;
     status: string;
     pages_read: number;
+    total_pages: number;
     date_added: string;
   };
 
@@ -58,8 +60,9 @@
   // Add-details popup state
   let showAddDialog = false;
   let pendingBook: MockBook | null = null;
-  let statusInput: BookStatus = "reading"; // default
+  let statusInput: BookStatus = "reading";
   let pagesReadInput = "0";
+  let totalPagesInput = "0";
 
   // Tab change effects
   $: if (activeTab !== previousTab) {
@@ -69,18 +72,19 @@
     previousTab = activeTab;
   }
 
+  // Reactive Logic for "Finished" status
+  $: if (statusInput === "finished") {
+    pagesReadInput = totalPagesInput;
+  }
+
   async function triggerBounceSequence() {
     isReturning = true;
-
     returnStage = "fading";
     await wait(250);
-
     returnStage = "bouncing_down";
     await wait(700);
-
     returnStage = "bouncing_up";
     await wait(600);
-
     returnStage = "idle";
     isReturning = false;
   }
@@ -106,9 +110,7 @@
 
   function cleanDescription(raw: string): string {
     if (!raw) return "";
-
     let text = raw;
-
     const cutMarkers = [
       "Also contained in:",
       "This work has also been published",
@@ -120,29 +122,29 @@
         text = text.slice(0, idx);
       }
     }
-
     text = text.replace(/\[(.*?)\]\(.*?\)/g, "$1");
     text = text.replace(/\(\[source]\[\d+]\)/gi, "");
     text = text.replace(/\[\d+]:\s*https?:\/\/\S+/gi, "");
     text = text.replace(/\s+/g, " ").trim();
-
     return text;
   }
 
-  // Orb visual states
   $: isGlowing =
     (isReturning && returnStage !== "idle") ||
     (isFocused && activeTab === "home") ||
     searchState === "loading" ||
     searchState === "result" ||
-    isAdding;
+    isAdding ||
+    isPulsing; // Add isPulsing here so orb glows when saving
 
-  $: shouldScale = isFocused && activeTab === "home" && !isReturning;
+  $: shouldScale = (isFocused && activeTab === "home" && !isReturning) || isPulsing;
 
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
-    isPulsing = true;
-    setTimeout(() => (isPulsing = false), 100);
+    // Small pulse on typing
+    // isPulsing = true; 
+    // setTimeout(() => (isPulsing = false), 100); 
+    // Commented out to prioritize save pulse, or keep if you like it
   }
 
   function handleFocus(_event: CustomEvent<FocusEvent>) {
@@ -156,10 +158,8 @@
     restoreOrbFloat();
   }
 
-  // Fetch up to MAX_RESULTS once when user presses Enter
   async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
     const e = event.detail;
-
     if (e.key !== "Enter" || !bookTitle.trim() || searchState !== "idle") return;
 
     const query = bookTitle.trim();
@@ -168,8 +168,9 @@
 
     try {
       const res = await fetch(
-        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}`
-      ); // 10 results max[web:469]
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
+      );
+
       if (!res.ok) {
         throw new Error(`Open Library error: ${res.status}`);
       }
@@ -216,12 +217,14 @@
 
         const cleaned = cleanDescription(fullSummary);
         const teaser = firstSentence(cleaned);
+        
+        const pageCount = doc.number_of_pages_median || doc.number_of_pages || 0;
 
         books.push({
           title: doc.title ?? query,
           author: doc.author_name?.[0] ?? "Unknown author",
           year: doc.first_publish_year?.toString() ?? "—",
-          pages: doc.number_of_pages_median?.toString() ?? "—",
+          pages: pageCount.toString(),
           summary: shorten(teaser, 120),
           fullSummary: cleaned,
           coverUrl
@@ -236,14 +239,17 @@
     }
   }
 
-  // Step 1: open the add-details popup instead of saving directly
   function handleAddRequest(event: CustomEvent<MockBook>) {
     const book = event.detail;
     if (!book || isAdding || isDiscarding) return;
 
     pendingBook = book;
     statusInput = "reading";
+    
+    const p = parseInt(book.pages || "0", 10);
+    totalPagesInput = isNaN(p) ? "0" : String(p);
     pagesReadInput = "0";
+    
     showAddDialog = true;
   }
 
@@ -252,47 +258,64 @@
     pendingBook = null;
   }
 
-  // Custom page increment/decrement
   function incrementPages() {
-    const n = Number.parseInt(pagesReadInput || "0", 10);
-    const base = Number.isNaN(n) || n < 0 ? 0 : n;
+    if (statusInput === "finished") return;
+    const current = Number.parseInt(pagesReadInput || "0", 10);
+    const total = Number.parseInt(totalPagesInput || "0", 10);
+    const base = Number.isNaN(current) || current < 0 ? 0 : current;
+    if (total > 0 && base >= total) {
+       pagesReadInput = String(total);
+       return; 
+    }
     pagesReadInput = String(base + 1);
   }
 
   function decrementPages() {
+    if (statusInput === "finished") return;
     const n = Number.parseInt(pagesReadInput || "0", 10);
     const base = Number.isNaN(n) || n <= 0 ? 0 : n;
     pagesReadInput = String(Math.max(0, base - 1));
   }
 
-  // Step 2: user confirms details -> save to Rust + animate
-  async function confirmAddDialog() {
+  function handlePageInput() {
+      const current = parseInt(pagesReadInput);
+      const total = parseInt(totalPagesInput);
+      if (!isNaN(total) && total > 0 && current > total) {
+          pagesReadInput = String(total);
+      }
+  }
+
+  function confirmAddDialog() {
     if (!pendingBook || isAdding) return;
 
     const pages_read = Number.parseInt(pagesReadInput || "0", 10);
-    const safePages = Number.isNaN(pages_read) || pages_read < 0 ? 0 : pages_read;
+    const total_pages = Number.parseInt(totalPagesInput || "0", 10);
+    const safePagesRead = Number.isNaN(pages_read) || pages_read < 0 ? 0 : pages_read;
+    const safeTotalPages = Number.isNaN(total_pages) || total_pages < 0 ? 0 : total_pages;
 
-    isAdding = true;
+    // 1. TRIGGER ORB GLOW ANIMATION
+    isPulsing = true; // Grows the orb
+    setTimeout(() => { isPulsing = false; }, 600); // Reset after animation
 
-    try {
-      const saved = await invoke<LibraryBook>('add_book', {
+    // 2. FADE OUT DIALOG (By setting showAddDialog to false)
+    showAddDialog = false;
+    isAdding = false;
+    
+    const payload = {
         title: pendingBook.title,
         author: pendingBook.author,
-        cover: pendingBook.coverUrl ?? "", // URL; Rust downloads and stores path
+        cover: pendingBook.coverUrl ?? "", 
         status: statusInput,
-        pagesRead: safePages,
-      }); // Tauri IPC to Rust command[web:758]
+        pagesRead: safePagesRead,
+        totalPages: safeTotalPages,
+    };
 
-      console.log("Saved book to library.json:", saved);
-      await wait(600);
-    } catch (err) {
-      console.error("Failed to save book", err);
-    } finally {
-      isAdding = false;
-      showAddDialog = false;
-      pendingBook = null;
-      resetSearch();
-    }
+    pendingBook = null;
+    resetSearch();
+
+    invoke('add_book', payload)
+      .then((saved) => console.log("Book saved:", saved))
+      .catch((err) => console.error("Save failed:", err));
   }
 
   async function handleDone() {
@@ -337,18 +360,13 @@
 
   function settleOrbToCenter() {
     if (!orbElement) return;
-
     const el = orbElement;
     const computed = getComputedStyle(el);
-    const currentTransform =
-      computed.transform === "none" ? "" : computed.transform;
-
+    const currentTransform = computed.transform === "none" ? "" : computed.transform;
     el.style.animation = "none";
     el.style.transform = currentTransform;
-
     requestAnimationFrame(() => {
-      el.style.transition =
-        "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
+      el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
       el.style.transform = "translateY(0)";
     });
   }
@@ -363,7 +381,6 @@
 
 <main>
   <Background />
-
   <Sidebar bind:activeTab={activeTab} />
 
   <section class="orb-stage">
@@ -408,8 +425,9 @@
       aria-label="Close description"
       on:click={handleOverlayClick}
       on:keydown={handleOverlayKeydown}
+      transition:fade={{ duration: 200 }}
     >
-      <div class="summary-dialog">
+      <div class="summary-dialog" transition:scale={{ duration: 300, start: 0.95 }}>
         <div class="summary-header">
           <h3>{summaryBook.title}</h3>
           <p class="summary-author">{summaryBook.author}</p>
@@ -427,7 +445,8 @@
   {/if}
 
   {#if showAddDialog && pendingBook}
-    <div class="add-overlay">
+    <!-- FADE TRANSITION ADDED HERE -->
+    <div class="add-overlay" transition:fade={{ duration: 250 }}>
       <div class="add-dialog">
         <div class="add-header">
           <h3>ADD TO LIBRARY</h3>
@@ -467,12 +486,13 @@
           </label>
 
           <label class="field field-center">
-            <span>Pages read</span>
-            <div class="pages-row">
+            <span>Pages read / {totalPagesInput}</span>
+            <div class="pages-row" class:disabled-row={statusInput === "finished"}>
               <button
                 type="button"
                 class="pages-arrow pages-arrow-left"
                 on:click={decrementPages}
+                disabled={statusInput === "finished"}
                 aria-label="Decrease pages read"
               >
                 –
@@ -481,12 +501,15 @@
                 type="number"
                 min="0"
                 bind:value={pagesReadInput}
+                on:input={handlePageInput}
+                disabled={statusInput === "finished"}
                 class="pages-input no-spin"
               />
               <button
                 type="button"
                 class="pages-arrow pages-arrow-right"
                 on:click={incrementPages}
+                disabled={statusInput === "finished"}
                 aria-label="Increase pages read"
               >
                 +
@@ -517,6 +540,7 @@
 </main>
 
 <style>
+  /* ... (Global/Layout Styles) ... */
   main {
     display: flex;
     height: 100vh;
@@ -571,7 +595,6 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    animation: summaryIn 0.2s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
   }
 
   .summary-header h3 {
@@ -610,17 +633,6 @@
     min-width: 90px;
   }
 
-  @keyframes summaryIn {
-    from {
-      opacity: 0;
-      transform: translateY(10px) scale(0.97);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-  }
-
   /* Add-details popup */
   .add-overlay {
     position: fixed;
@@ -651,7 +663,7 @@
     flex-direction: column;
     gap: 16px;
     transform-origin: center;
-    animation: addIn 0.22s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
+    /* Used standard svelte fade, removed custom animation here to avoid conflicts */
   }
 
   .add-header h3 {
@@ -692,7 +704,6 @@
     color: rgba(75, 51, 46, 0.8);
   }
 
-  /* center the whole Pages read block */
   .field-center {
     align-items: center;
     text-align: center;
@@ -730,12 +741,19 @@
   }
 
   /* Pages input + custom arrows */
-
   .pages-row {
     display: flex;
     align-items: center;
-    justify-content: center; /* center group[web:648][web:800] */
+    justify-content: center;
     gap: 10px;
+    transition: opacity 0.2s ease, filter 0.2s ease;
+  }
+  
+  /* Disabled state styling */
+  .pages-row.disabled-row {
+    opacity: 0.5;
+    filter: grayscale(0.5);
+    pointer-events: none;
   }
 
   .pages-input {
@@ -751,7 +769,6 @@
     outline: none;
   }
 
-  /* hide native number spinners[web:744][web:738] */
   .no-spin {
     -moz-appearance: textfield;
     appearance: textfield;
@@ -787,6 +804,11 @@
     background: rgba(255, 255, 255, 0.65);
     transform: translateY(-1px);
   }
+  
+  .pages-arrow:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
 
   .pages-arrow-left,
   .pages-arrow-right {
@@ -800,6 +822,7 @@
     margin-top: 6px;
   }
 
+  /* -- UPDATED BUTTON STYLES -- */
   .pill-btn {
     min-width: 90px;
     padding: 8px 20px;
@@ -813,33 +836,38 @@
     transition:
       background 0.18s ease,
       transform 0.12s ease,
-      box-shadow 0.18s ease;
-  }
-
-  .pill-primary {
-    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
-    color: #4b332e;
-    box-shadow: 0 10px 24px rgba(200, 120, 90, 0.35);
+      box-shadow 0.18s ease,
+      color 0.2s ease;
   }
 
   .pill-secondary {
     background: rgba(255, 255, 255, 0.4);
     color: #5b3b30;
   }
-
-  .pill-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 10px 24px rgba(181, 119, 83, 0.25);
+  
+  /* Save button: Ghost by default, Colorful only on Active/Click */
+  .pill-primary {
+    background: rgba(255, 255, 255, 0.5); /* Ghost-ish default */
+    color: #4b332e;
+    box-shadow: 0 4px 12px rgba(200, 120, 90, 0.15);
   }
 
-  @keyframes addIn {
-    from {
-      opacity: 0;
-      transform: translateY(12px) scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
+  .pill-primary:hover {
+    background: rgba(255, 255, 255, 0.75); /* Slightly more opaque on hover */
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(200, 120, 90, 0.2);
+  }
+
+  /* The "Burst" color effect only happens when clicking (active) */
+  .pill-primary:active {
+    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
+    color: #2c1810;
+    transform: translateY(1px);
+    box-shadow: 0 2px 8px rgba(200, 120, 90, 0.3);
+  }
+
+  .pill-secondary:hover {
+    background: rgba(255, 255, 255, 0.6);
+    transform: translateY(-1px);
   }
 </style>

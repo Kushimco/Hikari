@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use tokio::task; // Import tokio task for spawn_blocking
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Book {
@@ -16,6 +17,8 @@ pub struct Book {
     pub cover: String,
     pub cover_color: String,
     pub status: String,
+    #[serde(default)]
+    pub total_pages: u32,
     #[serde(default)]
     pub pages_read: u32,
     pub date_added: String,
@@ -63,7 +66,7 @@ fn download_cover_image(app: &tauri::AppHandle, url: &str) -> Result<String, Str
     let file_name = format!("{}.{}", uuid::Uuid::new_v4(), ext);
     let dest_path = covers_dir.join(file_name);
 
-    // Blocking download is fine in a tauri command.
+    // Blocking download is fine here because we will call this function inside spawn_blocking
     let mut response = reqwest::blocking::get(url).map_err(|e| e.to_string())?;
     let mut file = File::create(&dest_path).map_err(|e| e.to_string())?;
     copy(&mut response, &mut file).map_err(|e| e.to_string())?;
@@ -82,23 +85,38 @@ fn get_books(app: tauri::AppHandle) -> Vec<Book> {
     }
 }
 
+// Changed to async and returns Result so we can await the heavy download without blocking UI
 #[tauri::command]
-fn add_book(
+async fn add_book(
     app: tauri::AppHandle,
     title: String,
     author: String,
     cover: String,      // URL from frontend
     status: String,
     pages_read: u32,
-) -> Book {
+    total_pages: u32,
+) -> Result<Book, String> {
     let path = get_db_path(&app);
+    
+    // Note: get_books is synchronous/fast enough, or you could make it async too.
+    // Since it just reads a JSON file, it's usually okay on the main thread for small files,
+    // but for perfect responsiveness we can wrap the whole thing if needed. 
+    // For now, we only optimize the network request which is the main bottleneck.
     let mut books = get_books(app.clone());
 
-    // Try to download the cover; if it fails, keep the original URL.
-    let cover_path = match download_cover_image(&app, &cover) {
-        Ok(local) => local,
-        Err(_) => cover,
-    };
+    // We clone data needed for the thread
+    let app_handle_clone = app.clone();
+    let cover_url_clone = cover.clone();
+
+    // Run the download in a separate thread so the UI doesn't freeze
+    let cover_path = task::spawn_blocking(move || {
+        match download_cover_image(&app_handle_clone, &cover_url_clone) {
+            Ok(local_path) => local_path,
+            Err(_) => cover_url_clone, // Fallback to original URL if download fails
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let new_book = Book {
         id: uuid::Uuid::new_v4().to_string(),
@@ -107,15 +125,17 @@ fn add_book(
         cover: cover_path,
         cover_color: "#FF9A9E".to_string(),
         status,
+        total_pages,
         pages_read,
         date_added: Utc::now().to_rfc3339(),
     };
 
     books.push(new_book.clone());
 
-    let json = serde_json::to_string_pretty(&books).expect("failed to save");
-    fs::write(path, json).expect("failed to write file");
-    new_book
+    let json = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())?;
+
+    Ok(new_book)
 }
 
 #[tauri::command]
@@ -152,16 +172,12 @@ fn delete_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut books: Vec<Book> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
 
-    // Find the book before deleting it so we can get the cover path
     if let Some(index) = books.iter().position(|b| b.id == id) {
         let book = &books[index];
 
-        // Check if cover is a local file (not a web URL) and delete it
         if !book.cover.starts_with("http") && !book.cover.is_empty() {
             let cover_path = std::path::Path::new(&book.cover);
             if cover_path.exists() {
-                // Attempt to remove the file
-                // We print errors but don't fail the whole request if deletion fails
                 if let Err(e) = std::fs::remove_file(cover_path) {
                     println!("Warning: Failed to delete cover file: {}", e);
                 } else {
@@ -170,10 +186,8 @@ fn delete_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
             }
         }
 
-        // Now remove the book from the list
         books.remove(index);
 
-        // Save the updated library
         let new_data = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
         fs::write(path, new_data).map_err(|e| e.to_string())?;
         

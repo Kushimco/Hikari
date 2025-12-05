@@ -27,3 +27,4 @@ tauri-plugin-process = "2.3.1"
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
 chrono = "0.4.42"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+tokio = "1.48.0"
