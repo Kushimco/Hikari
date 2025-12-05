@@ -31,8 +31,9 @@
 
   let foundBook: MockBook | null = null;
 
-  // "Add" confirmation animation state
+  // "Add" and "Discard" confirmation animation states
   let isAdding = false;
+  let isDiscarding = false;
 
   // Reference to the orb element for smooth float → center transition
   let orbElement: HTMLDivElement | null = null;
@@ -75,7 +76,7 @@
 
   $: shouldScale = isFocused && activeTab === "home" && !isReturning;
 
-  // Input interactions (receive CustomEvent from BookSearchModule, but ignore detail where not needed)
+  // Input interactions (BookSearchModule dispatches CustomEvents)
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
     isPulsing = true;
@@ -118,7 +119,7 @@
   }
 
   async function handleAdd() {
-    if (!foundBook || isAdding) return;
+    if (!foundBook || isAdding || isDiscarding) return;
     console.log("Add book:", foundBook);
 
     isAdding = true;
@@ -127,14 +128,20 @@
     resetSearch();
   }
 
-  function handleDiscard() {
-    if (isAdding) return;
+  async function handleDiscard() {
+    if (!foundBook || isAdding || isDiscarding) return;
+
+    isDiscarding = true;
+    await wait(450); // match discard animation duration
+    isDiscarding = false;
     resetSearch();
   }
 
   function resetSearch() {
     searchState = "idle";
     foundBook = null;
+    isAdding = false;
+    isDiscarding = false;
   }
 
   function settleOrbToCenter() {
@@ -169,36 +176,36 @@
   <Sidebar bind:activeTab={activeTab} />
 
   <section class="orb-stage">
-   <Orb
-  bind:orbElement={orbElement}
-  {activeTab}
-  {isReturning}
-  {returnStage}
-  {isGlowing}
-  {shouldScale}
-  {isPulsing}
-  {isAdding}
->
-  {#if activeTab === "home" && !isReturning}
-    <BookSearchModule
-      bind:bookTitle={bookTitle}
-      {searchState}
-      {foundBook}
+    <Orb
+      bind:orbElement={orbElement}
+      {activeTab}
+      {isReturning}
+      {returnStage}
+      {isGlowing}
+      {shouldScale}
+      {isPulsing}
       {isAdding}
-      on:input={handleInput}
-      on:keydown={handleKeydown}
-      on:focus={handleFocus}
-      on:blur={handleBlur}
-      on:add={handleAdd}
-      on:discard={handleDiscard}
-    />
-  {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-    <div class="library-container" class:fade-out={returnStage === "fading"}>
-      <Library />
-    </div>
-  {/if}
-</Orb>
-
+    >
+      {#if activeTab === "home" && !isReturning}
+        <BookSearchModule
+          bind:bookTitle={bookTitle}
+          {searchState}
+          {foundBook}
+          {isAdding}
+          {isDiscarding}
+          on:input={handleInput}
+          on:keydown={handleKeydown}
+          on:focus={handleFocus}
+          on:blur={handleBlur}
+          on:add={handleAdd}
+          on:discard={handleDiscard}
+        />
+      {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
+        <div class="library-container" class:fade-out={returnStage === "fading"}>
+          <Library />
+        </div>
+      {/if}
+    </Orb>
   </section>
 </main>
 
@@ -220,14 +227,13 @@
   }
 
   .library-container {
-  width: 100%;
-  height: 100%;
-  opacity: 1;
-  transition: opacity 0.25s ease-out;
-}
+    width: 100%;
+    height: 100%;
+    opacity: 1;
+    transition: opacity 0.25s ease-out;
+  }
 
-.library-container.fade-out {
-  opacity: 0;
-}
-
+  .library-container.fade-out {
+    opacity: 0;
+  }
 </style>

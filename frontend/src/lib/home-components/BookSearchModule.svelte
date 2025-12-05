@@ -18,10 +18,18 @@
   export let searchState: SearchState = "idle";
   export let foundBook: MockBook | null = null;
 
-  // whether the "add" success animation is playing
+  // whether the "add" / "discard" animations are playing
   export let isAdding = false;
+  export let isDiscarding = false;
 
-  const dispatch = createEventDispatcher();
+  const dispatch = createEventDispatcher<{
+    input: Event;
+    keydown: KeyboardEvent;
+    focus: FocusEvent;
+    blur: FocusEvent;
+    add: void;
+    discard: void;
+  }>();
 
   function handleInput(e: Event) {
     dispatch("input", e);
@@ -49,7 +57,11 @@
 </script>
 
 {#if searchState === "result" && foundBook}
-  <div class="book-result" class:book-result-adding={isAdding}>
+  <div
+    class="book-result"
+    class:book-result-adding={isAdding}
+    class:book-result-discarding={isDiscarding}
+  >
     <div class="book-card">
       <div class="book-cover"></div>
       <div class="book-info">
@@ -163,7 +175,7 @@
     }
   }
 
-  /* Mock book result card; expands in smoothly, shrinks on add */
+  /* Mock book result card; expands in smoothly */
   .book-result {
     display: flex;
     flex-direction: column;
@@ -176,6 +188,10 @@
 
   .book-result-adding {
     animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards;
+  }
+
+  .book-result-discarding {
+    animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards;
   }
 
   @keyframes resultIn {
@@ -201,6 +217,24 @@
     100% {
       opacity: 0;
       transform: scale(0.92) translateY(-8px);
+    }
+  }
+
+  @keyframes resultDiscardOut {
+    0% {
+      opacity: 1;
+      transform: scale(1) translateY(0) rotate(0deg);
+      filter: blur(0px);
+    }
+    35% {
+      opacity: 1;
+      transform: scale(0.98) translateY(4px) rotate(-1.5deg);
+      filter: blur(0px);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.9) translateY(18px) rotate(-3deg);
+      filter: blur(2px);
     }
   }
 
@@ -312,7 +346,6 @@
     transition: opacity 0.15s ease-out;
   }
 
-  /* On focus show only caret, no placeholder text */
   input:focus::placeholder {
     opacity: 0;
   }
