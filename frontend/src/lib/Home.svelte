@@ -17,7 +17,7 @@
   let returnStage: ReturnStage = "idle";
   let isReturning = false;
 
-  // Search / mock result state
+  // Search / result state
   type SearchState = "idle" | "loading" | "result";
   let searchState: SearchState = "idle";
 
@@ -31,14 +31,15 @@
     coverUrl?: string | null;
   };
 
-  let foundBook: MockBook | null = null;
+  // Top N search results
+  let foundBooks: MockBook[] = [];
 
-  // "Add" and "Discard" confirmation animation states
+  // "Add" and "Done" confirmation animation states (global for now)
   let isAdding = false;
   let isDiscarding = false;
 
-  // Full summary modal state
-  let isSummaryOpen = false;
+  // Which book’s description is open in the modal (null = closed)
+  let summaryBook: MockBook | null = null;
 
   // Reference to the orb element for smooth float → center transition
   let orbElement: HTMLDivElement | null = null;
@@ -104,7 +105,7 @@
     // 3) Remove reference-style uses like "([source][1])"
     text = text.replace(/\(\[source]\[\d+]\)/gi, "");
 
-    // 4) Remove reference definitions like "[1]: https://..."
+    // 4) Remove reference definitions like "[1]: https?:..."
     text = text.replace(/\[\d+]:\s*https?:\/\/\S+/gi, "");
 
     // 5) Collapse excessive whitespace
@@ -141,7 +142,13 @@
     restoreOrbFloat();
   }
 
-  // Hit Enter to search Open Library (with cover + description)
+  function firstSentence(text: string): string {
+  if (!text) return "";
+  const match = text.match(/[^.!?]+[.!?]/); // up to first ., ! or ?
+  return match ? match[0].trim() : text;
+}
+
+  // Hit Enter to search Open Library (with cover + descriptions) and keep top 3
   async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
     const e = event.detail;
 
@@ -160,56 +167,62 @@
       }
 
       const data: any = await res.json();
-      const doc = data.docs?.[0];
+      const docs = (data.docs ?? []).slice(0, 3); // top 3 hits
 
-      if (!doc) {
+      if (!docs.length) {
         searchState = "idle";
         return;
       }
 
-      // Build cover URL from cover_i or first ISBN.
-      let coverUrl: string | null = null;
-      if (doc.cover_i) {
-        coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg?default=false`;
-      } else if (doc.isbn?.[0]) {
-        coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg?default=false`;
-      }
+      const books: MockBook[] = [];
 
-      // Fetch a description from the Work endpoint if available.
-      let fullSummary = "";
-      if (doc.key) {
-        try {
-          const workRes = await fetch(`https://openlibrary.org${doc.key}.json`);
-          if (workRes.ok) {
-            const workData: any = await workRes.json();
-            const desc = workData.description;
-            if (typeof desc === "string") {
-              fullSummary = desc;
-            } else if (desc && typeof desc === "object" && desc.value) {
-              fullSummary = desc.value;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to fetch work description", err);
+      for (const doc of docs) {
+        // Build cover URL from cover_i or first ISBN
+        let coverUrl: string | null = null;
+        if (doc.cover_i) {
+          coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg?default=false`;
+        } else if (doc.isbn?.[0]) {
+          coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg?default=false`;
         }
+
+        // Fetch a description from the Work endpoint if available
+        let fullSummary = "";
+        if (doc.key) {
+          try {
+            const workRes = await fetch(`https://openlibrary.org${doc.key}.json`);
+            if (workRes.ok) {
+              const workData: any = await workRes.json();
+              const desc = workData.description;
+              if (typeof desc === "string") {
+                fullSummary = desc;
+              } else if (desc && typeof desc === "object" && desc.value) {
+                fullSummary = desc.value;
+              }
+            }
+          } catch (err) {
+            console.error("Failed to fetch work description", err);
+          }
+        }
+
+        if (!fullSummary) {
+          fullSummary = "No description available.";
+        }
+
+        const cleaned = cleanDescription(fullSummary);
+        const teaser = firstSentence(cleaned);
+
+        books.push({
+          title: doc.title ?? query,
+          author: doc.author_name?.[0] ?? "Unknown author",
+          year: doc.first_publish_year?.toString() ?? "—",
+          pages: doc.number_of_pages_median?.toString() ?? "—",
+          summary: shorten(teaser, 40),
+          fullSummary: cleaned,
+          coverUrl
+        });
       }
 
-      if (!fullSummary) {
-        fullSummary = "No description available.";
-      }
-
-      const cleaned = cleanDescription(fullSummary);
-
-      foundBook = {
-        title: doc.title ?? query,
-        author: doc.author_name?.[0] ?? "Unknown author",
-        year: doc.first_publish_year?.toString() ?? "—",
-        pages: doc.number_of_pages_median?.toString() ?? "—",
-        summary: shorten(cleaned, 260),
-        fullSummary: cleaned,
-        coverUrl
-      };
-
+      foundBooks = books;
       searchState = "result";
     } catch (err) {
       console.error(err);
@@ -217,44 +230,45 @@
     }
   }
 
-  async function handleAdd() {
-    if (!foundBook || isAdding || isDiscarding) return;
-    console.log("Add book:", foundBook);
+  async function handleAdd(event: CustomEvent<MockBook>) {
+    const book = event.detail;
+    if (!book || isAdding || isDiscarding) return;
 
+    console.log("Add book:", book);
     isAdding = true;
     await wait(600);
     isAdding = false;
     resetSearch();
   }
 
-  async function handleDiscard() {
-    if (!foundBook || isAdding || isDiscarding) return;
-
+  async function handleDone() {
+    if (isAdding || isDiscarding) return;
     isDiscarding = true;
-    await wait(450); // match discard animation duration
+    await wait(300);
     isDiscarding = false;
     resetSearch();
   }
 
   function resetSearch() {
     searchState = "idle";
-    foundBook = null;
+    foundBooks = [];
     isAdding = false;
     isDiscarding = false;
-    isSummaryOpen = false;
+    summaryBook = null;
   }
 
-  function handleOpenSummary() {
-    if (!foundBook) return;
-    isSummaryOpen = true;
+  function handleOpenSummary(event: CustomEvent<MockBook>) {
+    const book = event.detail;
+    if (!book) return;
+    summaryBook = book;
   }
 
   function handleCloseSummary() {
-    isSummaryOpen = false;
+    summaryBook = null;
   }
 
   function handleOverlayClick(event: MouseEvent) {
-    // Only close when user clicks on the backdrop, not inside the dialog
+    // Only close when the user clicks on the backdrop, not inside the dialog
     if (event.target !== event.currentTarget) return;
     handleCloseSummary();
   }
@@ -314,7 +328,7 @@
         <BookSearchModule
           bind:bookTitle={bookTitle}
           {searchState}
-          {foundBook}
+          books={foundBooks}
           {isAdding}
           {isDiscarding}
           on:input={handleInput}
@@ -322,7 +336,7 @@
           on:focus={handleFocus}
           on:blur={handleBlur}
           on:add={handleAdd}
-          on:discard={handleDiscard}
+          on:done={handleDone}
           on:openSummary={handleOpenSummary}
         />
       {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
@@ -333,7 +347,7 @@
     </Orb>
   </section>
 
-  {#if isSummaryOpen && foundBook}
+  {#if summaryBook}
     <div
       class="summary-overlay"
       role="button"
@@ -344,11 +358,11 @@
     >
       <div class="summary-dialog">
         <div class="summary-header">
-          <h3>{foundBook.title}</h3>
-          <p class="summary-author">{foundBook.author}</p>
+          <h3>{summaryBook.title}</h3>
+          <p class="summary-author">{summaryBook.author}</p>
         </div>
         <div class="summary-body">
-          <p>{foundBook.fullSummary ?? foundBook.summary}</p>
+          <p>{summaryBook.fullSummary ?? summaryBook.summary}</p>
         </div>
         <div class="summary-actions">
           <button class="pill-btn summary-close" on:click={handleCloseSummary}>

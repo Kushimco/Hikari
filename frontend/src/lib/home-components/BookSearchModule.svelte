@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher } from "svelte";
 
   type SearchState = "idle" | "loading" | "result";
 
@@ -9,13 +9,13 @@
     year: string;
     pages: string;
     summary: string;       // truncated
-    fullSummary?: string;  // full text (for modal)
+    fullSummary?: string;  // full text for modal
     coverUrl?: string | null;
   };
 
   export let bookTitle = "";
   export let searchState: SearchState = "idle";
-  export let foundBook: MockBook | null = null;
+  export let books: MockBook[] = [];
   export let isAdding = false;
   export let isDiscarding = false;
 
@@ -24,10 +24,20 @@
     keydown: KeyboardEvent;
     focus: FocusEvent;
     blur: FocusEvent;
-    add: void;
-    discard: void;
-    openSummary: void;
+    add: MockBook;
+    done: void;
+    openSummary: MockBook;
   }>();
+
+  let currentIndex = 0;
+  let direction: "next" | "prev" = "next";
+
+  // Reset to first book when new results arrive
+  $: if (books && books.length > 0 && currentIndex >= books.length) {
+    currentIndex = 0;
+  }
+
+  $: currentBook = books.length ? books[currentIndex] : null;
 
   function handleInput(e: Event) {
     dispatch("input", e);
@@ -45,57 +55,120 @@
     dispatch("blur", e);
   }
 
-  function handleAdd() {
-    dispatch("add");
+  function handleAdd(book: MockBook) {
+    dispatch("add", book);
   }
 
-  function handleDiscard() {
-    dispatch("discard");
+  function handleOpenSummary(book: MockBook) {
+    dispatch("openSummary", book);
   }
 
-  function handleOpenSummary() {
-    dispatch("openSummary");
+  function handleDone() {
+    dispatch("done");
+  }
+
+  function goNext() {
+    if (!books.length) return;
+    direction = "next";
+    currentIndex = (currentIndex + 1) % books.length;
+  }
+
+  function goPrev() {
+    if (!books.length) return;
+    direction = "prev";
+    currentIndex = (currentIndex - 1 + books.length) % books.length;
   }
 </script>
 
-{#if searchState === "result" && foundBook}
-  <div
-    class="book-result"
-    class:book-result-adding={isAdding}
-    class:book-result-discarding={isDiscarding}
-  >
-    <div class="book-card">
-      <div class="book-cover">
-        {#if foundBook.coverUrl}
-          <img
-            src={foundBook.coverUrl}
-            alt={`Cover of ${foundBook.title}`}
-            loading="lazy"
-          />
-        {/if}
-      </div>
-      <div class="book-info">
-        <h2>{foundBook.title}</h2>
-        <p class="book-meta">
-          {foundBook.author} · {foundBook.year} · {foundBook.pages} pages
-        </p>
-
-        <!-- Changed from <p> to a real button, styled like text -->
+{#if searchState === "result" && currentBook}
+  <div class="carousel-shell">
+    <div class="carousel-row">
+      {#if books.length > 1}
         <button
           type="button"
-          class="book-summary-button"
-          on:click={handleOpenSummary}
+          class="nav-bubble nav-bubble-left"
+          on:click={goPrev}
+          aria-label="Previous result"
         >
-          {foundBook.summary}
+          ‹
         </button>
-      </div>
+      {/if}
+
+      {#key currentBook.title + currentIndex}
+        <div
+          class="book-card-wrapper"
+          class:slide-next={direction === "next"}
+          class:slide-prev={direction === "prev"}
+        >
+          <div
+            class="book-card"
+            class:book-card-adding={isAdding}
+            class:book-card-discarding={isDiscarding}
+          >
+            <div class="book-cover">
+              {#if currentBook.coverUrl}
+                <img
+                  src={currentBook.coverUrl}
+                  alt={`Cover of ${currentBook.title}`}
+                  loading="lazy"
+                />
+              {/if}
+            </div>
+            <div class="book-info">
+              <h2>{currentBook.title}</h2>
+              <p class="book-meta">
+                {currentBook.author} · {currentBook.year} · {currentBook.pages} pages
+              </p>
+              <button
+                type="button"
+                class="book-summary-button"
+                on:click={() => handleOpenSummary(currentBook)}
+                aria-label={`Read full description of ${currentBook.title}`}
+              >
+                {currentBook.summary}
+              </button>
+            </div>
+          </div>
+
+          {#if books.length > 1}
+            <div class="dot-row">
+              {#each books as _b, i}
+                <span
+                  class="dot"
+                  class:dot-active={i === currentIndex}
+                ></span>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/key}
+
+      {#if books.length > 1}
+        <button
+          type="button"
+          class="nav-bubble nav-bubble-right"
+          on:click={goNext}
+          aria-label="Next result"
+        >
+          ›
+        </button>
+      {/if}
     </div>
-    <div class="book-actions">
-      <button class="pill-btn pill-add" on:click={handleAdd}>
-        Add
+
+    <div class="carousel-footer">
+      <button
+        type="button"
+        class="pill-btn pill-done"
+        on:click={handleDone}
+      >
+        Done
       </button>
-      <button class="pill-btn pill-discard" on:click={handleDiscard}>
-        Discard
+      <button
+        type="button"
+        class="pill-btn pill-add"
+        on:click={() => handleAdd(currentBook)}
+      >
+        Add
       </button>
     </div>
   </div>
@@ -122,160 +195,97 @@
 {/if}
 
 <style>
-  /* Glass input capsule / morphing shell */
-  .glass-capsule {
-    background: rgba(255, 255, 255, 0.3);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    padding: 18px 36px;
-    border-radius: 100px;
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
-    width: 340px;
+  /* Carousel shell sized to sit nicely inside orb */
+  .carousel-shell {
+    width: 420px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .carousel-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    column-gap: 10px;
+  }
+
+  .book-card-wrapper {
+    position: relative;
+  }
+
+  /* Navigation bubbles */
+  .nav-bubble {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.2);
+    color: #5b3b30;
+    font-size: 1.4rem;
     display: flex;
     align-items: center;
     justify-content: center;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    cursor: pointer;
+    box-shadow: 0 10px 25px rgba(181, 119, 83, 0.25);
     transition:
-      width 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      height 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      padding 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      border-radius 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      box-shadow 0.35s ease,
-      background 0.35s ease;
+      background 0.2s ease,
+      transform 0.15s ease,
+      box-shadow 0.2s ease;
   }
 
-  .glass-capsule.fade-in-delayed {
-    animation: fadeIn 0.8s ease forwards;
-    opacity: 0;
+  .nav-bubble:hover {
+    background: rgba(255, 255, 255, 0.32);
+    transform: translateY(-1px);
   }
 
-  /* Morph state: pill → circle for loader */
-  .glass-capsule-loading {
-    width: 72px;
-    height: 72px;
-    padding: 0;
-    border-radius: 999px;
-    box-shadow: 0 14px 36px rgba(181, 119, 83, 0.35);
-    background: rgba(255, 255, 255, 0.45);
+  .nav-bubble-left {
+    justify-self: flex-start;
   }
 
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  .nav-bubble-right {
+    justify-self: flex-end;
   }
 
-  .glass-capsule:focus-within {
-    transform: scale(1.03);
-    background: rgba(255, 255, 255, 0.45);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
-  }
-
-  /* Loading circle inside morphing capsule */
-  .loading-circle {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    border: 3px solid rgba(255, 255, 255, 0.6);
-    border-top-color: rgba(205, 132, 94, 1);
-    box-shadow: 0 0 24px rgba(205, 132, 94, 0.4);
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* Mock book result card; expands in smoothly, shrinks on add/discard */
-  .book-result {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 24px;
-    max-width: 640px;
-    transform-origin: center center;
-    animation: resultIn 0.4s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
-  }
-
-  .book-result-adding {
-    animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards;
-  }
-
-  .book-result-discarding {
-    animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards;
-  }
-
-  @keyframes resultIn {
-    from {
-      opacity: 0;
-      transform: scale(0.9) translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1) translateY(0);
-    }
-  }
-
-  @keyframes resultAddOut {
-    0% {
-      opacity: 1;
-      transform: scale(1) translateY(0);
-    }
-    45% {
-      opacity: 1;
-      transform: scale(1.03) translateY(-2px);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(0.92) translateY(-8px);
-    }
-  }
-
-  @keyframes resultDiscardOut {
-    0% {
-      opacity: 1;
-      transform: scale(1) translateY(0) rotate(0deg);
-    }
-    35% {
-      opacity: 1;
-      transform: scale(0.98) translateY(4px) rotate(-1.5deg);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(0.9) translateY(18px) rotate(-3deg);
-    }
-  }
-
+  /* Card */
   .book-card {
     display: flex;
-    gap: 24px;
-    align-items: stretch;
+    gap: 20px;
+    align-items: center; /* center cover + text vertically */
     background: rgba(255, 255, 255, 0.3);
     border-radius: 24px;
-    padding: 22px 26px;
+    padding: 22px 24px;  /* a bit more vertical padding */
     border: 1px solid rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06);
   }
 
+  .book-card-adding {
+    animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards;
+  }
+
+  .book-card-discarding {
+    animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards;
+  }
+
   .book-cover {
-    width: 120px;
-    min-width: 120px;
-    height: 150px;
+    width: 96px;
+    min-width: 96px;
+    height: 128px;
     border-radius: 18px;
     background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
     box-shadow:
       0 10px 25px rgba(181, 119, 83, 0.35),
       inset 0 0 12px rgba(255, 255, 255, 0.7);
     overflow: hidden;
+    flex-shrink: 0;
     display: flex;
     align-items: stretch;
     justify-content: center;
@@ -289,6 +299,8 @@
   }
 
   .book-info {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -296,18 +308,19 @@
 
   .book-info h2 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1.05rem;
     font-weight: 600;
     color: #4b332e;
+    text-align: left;
   }
 
   .book-meta {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     color: rgba(75, 51, 46, 0.7);
   }
 
-  /* Button that looks like your old .book-summary text */
+  /* Description: clamp to 2 lines so layout stays stable */
   .book-summary-button {
     margin: 6px 0 0;
     padding: 0;
@@ -316,9 +329,15 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     line-height: 1.4;
     color: rgba(75, 51, 46, 0.8);
+
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; /* WebKit / legacy Safari */
+    line-clamp: 2;          /* standard property */
+    overflow: hidden;
   }
 
   .book-summary-button:hover,
@@ -327,7 +346,28 @@
     outline: none;
   }
 
-  .book-actions {
+  /* Little dots under card */
+  .dot-row {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.5);
+  }
+
+  .dot-active {
+    background: rgba(181, 119, 83, 0.95);
+    box-shadow: 0 0 10px rgba(181, 119, 83, 0.7);
+  }
+
+  /* Footer buttons */
+  .carousel-footer {
     display: flex;
     gap: 12px;
     justify-content: center;
@@ -361,12 +401,144 @@
     border-color: rgba(255, 255, 255, 0.9);
   }
 
-  .pill-discard {
+  .pill-done {
     border-color: rgba(255, 255, 255, 0.6);
     background: rgba(255, 255, 255, 0.16);
   }
 
-  /* Text input */
+  /* Slide animations for next/prev */
+  .slide-next {
+    animation: slideNext 0.25s ease-out;
+  }
+
+  .slide-prev {
+    animation: slidePrev 0.25s ease-out;
+  }
+
+  @keyframes slideNext {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes slidePrev {
+    from {
+      opacity: 0;
+      transform: translateX(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes resultAddOut {
+    0% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+    45% {
+      opacity: 1;
+      transform: scale(1.03) translateY(-2px);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.92) translateY(-8px);
+    }
+  }
+
+  @keyframes resultDiscardOut {
+    0% {
+      opacity: 1;
+      transform: scale(1) translateY(0) rotate(0deg);
+      filter: blur(0px);
+    }
+    35% {
+      opacity: 1;
+      transform: scale(0.98) translateY(4px) rotate(-1.5deg);
+      filter: blur(0px);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.9) translateY(18px) rotate(-3deg);
+      filter: blur(2px);
+    }
+  }
+
+  /* Existing glass / loader styles */
+  .glass-capsule {
+    background: rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    padding: 18px 36px;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+    width: 340px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      width 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      height 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      padding 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      border-radius 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      box-shadow 0.35s ease,
+      background 0.35s ease;
+  }
+
+  .glass-capsule.fade-in-delayed {
+    animation: fadeIn 0.8s ease forwards;
+    opacity: 0;
+  }
+
+  .glass-capsule-loading {
+    width: 72px;
+    height: 72px;
+    padding: 0;
+    border-radius: 999px;
+    box-shadow: 0 14px 36px rgba(181, 119, 83, 0.35);
+    background: rgba(255, 255, 255, 0.45);
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .glass-capsule:focus-within {
+    transform: scale(1.03);
+    background: rgba(255, 255, 255, 0.45);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+  }
+
+  .loading-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.6);
+    border-top-color: rgba(205, 132, 94, 1);
+    box-shadow: 0 0 24px rgba(205, 132, 94, 0.4);
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   input {
     width: 100%;
     background: transparent;
