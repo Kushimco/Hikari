@@ -4,6 +4,7 @@
   import Background from './home-components/Background.svelte';
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
+  import { invoke } from '@tauri-apps/api/core'; 
 
   // UI state
   let bookTitle = "";
@@ -12,7 +13,7 @@
   let activeTab: "home" | "menu" = "home";
   let previousTab: "home" | "menu" = activeTab;
 
-  // Return animation state (home bounce after leaving library)
+  // Return animation state
   type ReturnStage = "idle" | "fading" | "bouncing_down" | "bouncing_up";
   let returnStage: ReturnStage = "idle";
   let isReturning = false;
@@ -26,14 +27,26 @@
     author: string;
     year: string;
     pages: string;
-    summary: string;       // truncated
-    fullSummary?: string;  // full text for modal
+    summary: string;
+    fullSummary?: string;
     coverUrl?: string | null;
   };
 
+  type LibraryBook = {
+    id: string;
+    title: string;
+    author: string;
+    cover: string;
+    cover_color: string;
+    status: string;
+    pages_read: number;
+    date_added: string;
+  };
+
+  type BookStatus = "to-read" | "reading" | "finished";
+
   const MAX_RESULTS = 10;
 
-  // Current search results (fixed list per search)
   let foundBooks: MockBook[] = [];
 
   let isAdding = false;
@@ -41,6 +54,12 @@
 
   let summaryBook: MockBook | null = null;
   let orbElement: HTMLDivElement | null = null;
+
+  // Add-details popup state
+  let showAddDialog = false;
+  let pendingBook: MockBook | null = null;
+  let statusInput: BookStatus = "reading"; // default
+  let pagesReadInput = "0";
 
   // Tab change effects
   $: if (activeTab !== previousTab) {
@@ -110,7 +129,7 @@
     return text;
   }
 
-  // Derived visual states for Orb
+  // Orb visual states
   $: isGlowing =
     (isReturning && returnStage !== "idle") ||
     (isFocused && activeTab === "home") ||
@@ -150,7 +169,7 @@
     try {
       const res = await fetch(
         `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}`
-      ); // limit server-side to 10[web:469]
+      ); // 10 results max[web:469]
       if (!res.ok) {
         throw new Error(`Open Library error: ${res.status}`);
       }
@@ -217,15 +236,63 @@
     }
   }
 
-  async function handleAdd(event: CustomEvent<MockBook>) {
+  // Step 1: open the add-details popup instead of saving directly
+  function handleAddRequest(event: CustomEvent<MockBook>) {
     const book = event.detail;
     if (!book || isAdding || isDiscarding) return;
 
-    console.log("Add book:", book);
+    pendingBook = book;
+    statusInput = "reading";
+    pagesReadInput = "0";
+    showAddDialog = true;
+  }
+
+  function cancelAddDialog() {
+    showAddDialog = false;
+    pendingBook = null;
+  }
+
+  // Custom page increment/decrement
+  function incrementPages() {
+    const n = Number.parseInt(pagesReadInput || "0", 10);
+    const base = Number.isNaN(n) || n < 0 ? 0 : n;
+    pagesReadInput = String(base + 1);
+  }
+
+  function decrementPages() {
+    const n = Number.parseInt(pagesReadInput || "0", 10);
+    const base = Number.isNaN(n) || n <= 0 ? 0 : n;
+    pagesReadInput = String(Math.max(0, base - 1));
+  }
+
+  // Step 2: user confirms details -> save to Rust + animate
+  async function confirmAddDialog() {
+    if (!pendingBook || isAdding) return;
+
+    const pages_read = Number.parseInt(pagesReadInput || "0", 10);
+    const safePages = Number.isNaN(pages_read) || pages_read < 0 ? 0 : pages_read;
+
     isAdding = true;
-    await wait(600);
-    isAdding = false;
-    resetSearch();
+
+    try {
+      const saved = await invoke<LibraryBook>('add_book', {
+        title: pendingBook.title,
+        author: pendingBook.author,
+        cover: pendingBook.coverUrl ?? "", // URL; Rust downloads and stores path
+        status: statusInput,
+        pagesRead: safePages,
+      }); // Tauri IPC to Rust command[web:758]
+
+      console.log("Saved book to library.json:", saved);
+      await wait(600);
+    } catch (err) {
+      console.error("Failed to save book", err);
+    } finally {
+      isAdding = false;
+      showAddDialog = false;
+      pendingBook = null;
+      resetSearch();
+    }
   }
 
   async function handleDone() {
@@ -321,7 +388,7 @@
           on:keydown={handleKeydown}
           on:focus={handleFocus}
           on:blur={handleBlur}
-          on:add={handleAdd}
+          on:add={handleAddRequest}
           on:done={handleDone}
           on:openSummary={handleOpenSummary}
         />
@@ -358,6 +425,95 @@
       </div>
     </div>
   {/if}
+
+  {#if showAddDialog && pendingBook}
+    <div class="add-overlay">
+      <div class="add-dialog">
+        <div class="add-header">
+          <h3>ADD TO LIBRARY</h3>
+          <p>{pendingBook.title}</p>
+          <span class="add-author">{pendingBook.author}</span>
+        </div>
+
+        <div class="add-body">
+          <label class="field">
+            <span>Status</span>
+            <div class="status-row">
+              <button
+                type="button"
+                class="status-pill"
+                class:status-pill-active={statusInput === "to-read"}
+                on:click={() => (statusInput = "to-read")}
+              >
+                To read
+              </button>
+              <button
+                type="button"
+                class="status-pill"
+                class:status-pill-active={statusInput === "reading"}
+                on:click={() => (statusInput = "reading")}
+              >
+                Reading
+              </button>
+              <button
+                type="button"
+                class="status-pill"
+                class:status-pill-active={statusInput === "finished"}
+                on:click={() => (statusInput = "finished")}
+              >
+                Finished
+              </button>
+            </div>
+          </label>
+
+          <label class="field field-center">
+            <span>Pages read</span>
+            <div class="pages-row">
+              <button
+                type="button"
+                class="pages-arrow pages-arrow-left"
+                on:click={decrementPages}
+                aria-label="Decrease pages read"
+              >
+                –
+              </button>
+              <input
+                type="number"
+                min="0"
+                bind:value={pagesReadInput}
+                class="pages-input no-spin"
+              />
+              <button
+                type="button"
+                class="pages-arrow pages-arrow-right"
+                on:click={incrementPages}
+                aria-label="Increase pages read"
+              >
+                +
+              </button>
+            </div>
+          </label>
+        </div>
+
+        <div class="add-actions">
+          <button
+            type="button"
+            class="pill-btn pill-secondary"
+            on:click={cancelAddDialog}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="pill-btn pill-primary"
+            on:click={confirmAddDialog}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -388,10 +544,11 @@
     opacity: 0;
   }
 
+  /* Summary modal */
   .summary-overlay {
     position: fixed;
     inset: 0;
-    z-index: 999;
+    z-index: 900;
     background: rgba(34, 22, 19, 0.35);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
@@ -404,7 +561,7 @@
     max-width: 620px;
     max-height: 70vh;
     width: 90%;
-    background: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.78);
     border-radius: 28px;
     padding: 24px 26px 20px;
     box-shadow:
@@ -457,6 +614,228 @@
     from {
       opacity: 0;
       transform: translateY(10px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Add-details popup */
+  .add-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(circle at top left, rgba(255, 190, 150, 0.4), transparent 55%),
+      radial-gradient(circle at bottom right, rgba(255, 140, 180, 0.35), transparent 60%),
+      rgba(255, 220, 200, 0.35);
+    backdrop-filter: blur(22px) saturate(1.25);
+    -webkit-backdrop-filter: blur(22px) saturate(1.25);
+  }
+
+  .add-dialog {
+    width: 420px;
+    max-width: 90vw;
+    background: rgba(255, 255, 255, 0.68);
+    border-radius: 26px;
+    padding: 20px 22px 18px;
+    box-shadow:
+      0 20px 40px rgba(180, 110, 80, 0.35),
+      inset 0 0 18px rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 245, 240, 0.95);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    transform-origin: center;
+    animation: addIn 0.22s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
+  }
+
+  .add-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(131, 91, 74, 0.9);
+    text-align: center;
+  }
+
+  .add-header p {
+    margin: 4px 0 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #4b332e;
+    text-align: center;
+  }
+
+  .add-author {
+    font-size: 0.85rem;
+    color: rgba(75, 51, 46, 0.7);
+    text-align: center;
+  }
+
+  .add-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 10px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: rgba(75, 51, 46, 0.8);
+  }
+
+  /* center the whole Pages read block */
+  .field-center {
+    align-items: center;
+    text-align: center;
+  }
+
+  .field-center > span {
+    width: 100%;
+    text-align: center;
+  }
+
+  .status-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .status-pill {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.5);
+    color: #5b3b30;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition:
+      background 0.18s ease,
+      box-shadow 0.18s ease,
+      transform 0.12s ease;
+  }
+
+  .status-pill-active {
+    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
+    box-shadow: 0 8px 18px rgba(200, 120, 90, 0.3);
+    transform: translateY(-1px);
+  }
+
+  /* Pages input + custom arrows */
+
+  .pages-row {
+    display: flex;
+    align-items: center;
+    justify-content: center; /* center group[web:648][web:800] */
+    gap: 10px;
+  }
+
+  .pages-input {
+    width: 90px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.9);
+    color: #4b332e;
+    font-size: 0.9rem;
+    text-align: center;
+    outline: none;
+  }
+
+  /* hide native number spinners[web:744][web:738] */
+  .no-spin {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .no-spin::-webkit-outer-spin-button,
+  .no-spin::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .pages-arrow {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.42);
+    color: #5b3b30;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow:
+      0 6px 14px rgba(200, 120, 90, 0.25),
+      inset 0 0 8px rgba(255, 255, 255, 0.7);
+    transition:
+      background 0.15s ease,
+      transform 0.12s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .pages-arrow:hover {
+    background: rgba(255, 255, 255, 0.65);
+    transform: translateY(-1px);
+  }
+
+  .pages-arrow-left,
+  .pages-arrow-right {
+    padding-bottom: 1px;
+  }
+
+  .add-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .pill-btn {
+    min-width: 90px;
+    padding: 8px 20px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    transition:
+      background 0.18s ease,
+      transform 0.12s ease,
+      box-shadow 0.18s ease;
+  }
+
+  .pill-primary {
+    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
+    color: #4b332e;
+    box-shadow: 0 10px 24px rgba(200, 120, 90, 0.35);
+  }
+
+  .pill-secondary {
+    background: rgba(255, 255, 255, 0.4);
+    color: #5b3b30;
+  }
+
+  .pill-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(181, 119, 83, 0.25);
+  }
+
+  @keyframes addIn {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.96);
     }
     to {
       opacity: 1;
