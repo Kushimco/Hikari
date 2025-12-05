@@ -35,6 +35,9 @@
 
   let foundBook: MockBook | null = null;
 
+  // "Add" confirmation animation state
+  let isAdding = false;
+
   // Reference to the orb element for smooth float → center transition
   let orbEl: HTMLDivElement | null = null;
 
@@ -71,7 +74,8 @@
     (isReturning && returnStage !== "idle") ||
     (isFocused && activeTab === "home") ||
     searchState === "loading" ||
-    searchState === "result";
+    searchState === "result" ||
+    isAdding;
 
   $: shouldScale = isFocused && activeTab === "home" && !isReturning;
 
@@ -115,14 +119,19 @@
     }
   }
 
-  function handleAdd() {
-    if (foundBook) {
-      console.log("Add book:", foundBook);
-    }
+  async function handleAdd() {
+    if (!foundBook || isAdding) return;
+    console.log("Add book:", foundBook);
+
+    // Play add animation, then reset to idle input
+    isAdding = true;
+    await wait(600);
+    isAdding = false;
     resetSearch();
   }
 
   function handleDiscard() {
+    if (isAdding) return;
     resetSearch();
   }
 
@@ -201,26 +210,11 @@
         class:glowing={isGlowing}
         class:typing-scale={shouldScale}
         class:pulsing={isPulsing && activeTab === "home"}
+        class:add-success={isAdding}
       >
         {#if activeTab === "home" && !isReturning}
-          {#if searchState === "idle"}
-            <div class="glass-capsule fade-in-delayed">
-              <input
-                type="text"
-                bind:value={bookTitle}
-                placeholder="What are you reading?"
-                on:input={handleInput}
-                on:keydown={handleKeydown}
-                on:focus={handleFocus}
-                on:blur={handleBlur}
-              />
-            </div>
-          {:else if searchState === "loading"}
-            <div class="search-loading">
-              <div class="loading-circle"></div>
-            </div>
-          {:else if searchState === "result" && foundBook}
-            <div class="book-result">
+          {#if searchState === "result" && foundBook}
+            <div class="book-result" class:book-result-adding={isAdding}>
               <div class="book-card">
                 <div class="book-cover"></div>
                 <div class="book-info">
@@ -239,6 +233,26 @@
                   Discard
                 </button>
               </div>
+            </div>
+          {:else}
+            <div
+              class="glass-capsule"
+              class:fade-in-delayed={searchState === "idle"}
+              class:glass-capsule-loading={searchState === "loading"}
+            >
+              {#if searchState === "idle"}
+                <input
+                  type="text"
+                  bind:value={bookTitle}
+                  placeholder="What are you reading?"
+                  on:input={handleInput}
+                  on:keydown={handleKeydown}
+                  on:focus={handleFocus}
+                  on:blur={handleBlur}
+                />
+              {:else if searchState === "loading"}
+                <div class="loading-circle"></div>
+              {/if}
             </div>
           {/if}
         {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
@@ -489,6 +503,33 @@
     display: none;
   }
 
+  /* Extra orb pulse for successful add */
+  .orb.add-success {
+    animation: float 8s ease-in-out infinite, addPulse 0.6s ease-out;
+  }
+
+  @keyframes addPulse {
+    0% {
+      box-shadow:
+        inset 2px 4px 20px rgba(255, 255, 255, 0.6),
+        0 25px 60px rgba(219, 168, 172, 0.35);
+      filter: brightness(1.05);
+    }
+    40% {
+      box-shadow:
+        inset 0 0 26px rgba(255, 255, 255, 0.9),
+        0 0 120px rgba(255, 220, 180, 0.9),
+        0 40px 90px rgba(219, 168, 172, 0.6);
+      filter: brightness(1.12);
+    }
+    100% {
+      box-shadow:
+        inset 2px 4px 20px rgba(255, 255, 255, 0.6),
+        0 25px 60px rgba(219, 168, 172, 0.35);
+      filter: brightness(1.05);
+    }
+  }
+
   /* Library content fade */
   .library-container {
     width: 100%;
@@ -501,7 +542,7 @@
     opacity: 0;
   }
 
-  /* Glass input capsule */
+  /* Glass input capsule / morphing shell */
   .glass-capsule {
     background: rgba(255, 255, 255, 0.3);
     backdrop-filter: blur(16px);
@@ -511,12 +552,31 @@
     border: 1px solid rgba(255, 255, 255, 0.5);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
     width: 340px;
-    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      width 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      height 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      padding 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      border-radius 0.35s cubic-bezier(0.25, 1, 0.5, 1),
+      box-shadow 0.35s ease,
+      background 0.35s ease;
   }
 
   .glass-capsule.fade-in-delayed {
     animation: fadeIn 0.8s ease forwards;
     opacity: 0;
+  }
+
+  /* Morph state: pill → circle for loader */
+  .glass-capsule-loading {
+    width: 72px;
+    height: 72px;
+    padding: 0;
+    border-radius: 999px;
+    box-shadow: 0 14px 36px rgba(181, 119, 83, 0.35);
+    background: rgba(255, 255, 255, 0.45);
   }
 
   @keyframes fadeIn {
@@ -536,16 +596,10 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
   }
 
-  /* Loading mock state */
-  .search-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
+  /* Loading circle inside morphing capsule */
   .loading-circle {
-    width: 52px;
-    height: 52px;
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
     border: 3px solid rgba(255, 255, 255, 0.6);
     border-top-color: rgba(205, 132, 94, 1);
@@ -559,18 +613,50 @@
     }
   }
 
-  /* Mock book result card */
+  /* Mock book result card; expands in smoothly, shrinks on add */
   .book-result {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 20px;
-    max-width: 580px;
+    gap: 24px;
+    max-width: 640px;
+    transform-origin: center center;
+    animation: resultIn 0.4s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
+  }
+
+  .book-result-adding {
+    animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards;
+  }
+
+  @keyframes resultIn {
+    from {
+      opacity: 0;
+      transform: scale(0.9) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes resultAddOut {
+    0% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+    45% {
+      opacity: 1;
+      transform: scale(1.03) translateY(-2px);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.92) translateY(-8px);
+    }
   }
 
   .book-card {
     display: flex;
-    gap: 20px;
+    gap: 24px;
     align-items: stretch;
     background: rgba(255, 255, 255, 0.3);
     border-radius: 24px;
@@ -582,9 +668,10 @@
   }
 
   .book-cover {
-    width: 130px;
-    min-width: 90px;
-    border-radius: 16px;
+    width: 120px;
+    min-width: 120px;
+    height: 150px;
+    border-radius: 18px;
     background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
     box-shadow:
       0 10px 25px rgba(181, 119, 83, 0.35),
@@ -606,13 +693,13 @@
 
   .book-meta {
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     color: rgba(75, 51, 46, 0.7);
   }
 
   .book-summary {
     margin: 6px 0 0;
-    font-size: 0.88rem;
+    font-size: 0.95rem;
     line-height: 1.4;
     color: rgba(75, 51, 46, 0.8);
   }
