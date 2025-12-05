@@ -8,17 +8,14 @@
     author: string;
     year: string;
     pages: string;
-    summary: string;
+    summary: string;       // truncated
+    fullSummary?: string;  // full text (for modal)
+    coverUrl?: string | null;
   };
 
-  // bind:bookTitle in parent
   export let bookTitle = "";
-
-  // current search state + found book (provided by Home.svelte)
   export let searchState: SearchState = "idle";
   export let foundBook: MockBook | null = null;
-
-  // whether the "add" / "discard" animations are playing
   export let isAdding = false;
   export let isDiscarding = false;
 
@@ -29,6 +26,7 @@
     blur: FocusEvent;
     add: void;
     discard: void;
+    openSummary: void;
   }>();
 
   function handleInput(e: Event) {
@@ -54,6 +52,10 @@
   function handleDiscard() {
     dispatch("discard");
   }
+
+  function handleOpenSummary() {
+    dispatch("openSummary");
+  }
 </script>
 
 {#if searchState === "result" && foundBook}
@@ -63,13 +65,29 @@
     class:book-result-discarding={isDiscarding}
   >
     <div class="book-card">
-      <div class="book-cover"></div>
+      <div class="book-cover">
+        {#if foundBook.coverUrl}
+          <img
+            src={foundBook.coverUrl}
+            alt={`Cover of ${foundBook.title}`}
+            loading="lazy"
+          />
+        {/if}
+      </div>
       <div class="book-info">
         <h2>{foundBook.title}</h2>
         <p class="book-meta">
           {foundBook.author} · {foundBook.year} · {foundBook.pages} pages
         </p>
-        <p class="book-summary">{foundBook.summary}</p>
+
+        <!-- Changed from <p> to a real button, styled like text -->
+        <button
+          type="button"
+          class="book-summary-button"
+          on:click={handleOpenSummary}
+        >
+          {foundBook.summary}
+        </button>
       </div>
     </div>
     <div class="book-actions">
@@ -175,7 +193,7 @@
     }
   }
 
-  /* Mock book result card; expands in smoothly */
+  /* Mock book result card; expands in smoothly, shrinks on add/discard */
   .book-result {
     display: flex;
     flex-direction: column;
@@ -224,17 +242,14 @@
     0% {
       opacity: 1;
       transform: scale(1) translateY(0) rotate(0deg);
-      filter: blur(0px);
     }
     35% {
       opacity: 1;
       transform: scale(0.98) translateY(4px) rotate(-1.5deg);
-      filter: blur(0px);
     }
     100% {
       opacity: 0;
       transform: scale(0.9) translateY(18px) rotate(-3deg);
-      filter: blur(2px);
     }
   }
 
@@ -260,6 +275,17 @@
     box-shadow:
       0 10px 25px rgba(181, 119, 83, 0.35),
       inset 0 0 12px rgba(255, 255, 255, 0.7);
+    overflow: hidden;
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .book-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .book-info {
@@ -281,11 +307,24 @@
     color: rgba(75, 51, 46, 0.7);
   }
 
-  .book-summary {
+  /* Button that looks like your old .book-summary text */
+  .book-summary-button {
     margin: 6px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
     font-size: 0.95rem;
     line-height: 1.4;
     color: rgba(75, 51, 46, 0.8);
+  }
+
+  .book-summary-button:hover,
+  .book-summary-button:focus-visible {
+    color: rgba(75, 51, 46, 0.95);
+    outline: none;
   }
 
   .book-actions {
