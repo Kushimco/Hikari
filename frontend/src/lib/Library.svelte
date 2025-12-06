@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke, convertFileSrc } from '@tauri-apps/api/core'; // Tauri v2[web:851]
+  import { invoke, convertFileSrc } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { fade, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -14,6 +14,8 @@
     cover_color: string;
     status: string;
     date_added?: string;
+    total_pages: number;  // Added
+    pages_read: number;   // Added
   };
 
   // -- STATE --
@@ -42,15 +44,10 @@
   // Turn stored cover (local path or URL) into an <img src>
   function coverSrc(book: Book | null): string {
     if (!book || !book.cover) return "";
-
-    // If it looks like a URL, use as-is (old entries before download logic)
     if (book.cover.startsWith("http://") || book.cover.startsWith("https://")) {
       return book.cover;
     }
-
-    // Otherwise it is a file path saved by Rust under app_data_dir/covers[web:826]
-    const src = convertFileSrc(book.cover); // returns asset:// URL for webview[web:861]
-    console.log("cover path -> src", book.cover, src);
+    const src = convertFileSrc(book.cover);
     return src;
   }
 
@@ -59,7 +56,7 @@
     const matchesStatus =
       activeFilter === 'All'
         ? true
-        : book.status.toLowerCase() === activeFilter.toLowerCase();
+        : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-'); // handle 'To Read' -> 'to-read'
 
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
@@ -101,15 +98,58 @@
   // -- BOOK ACTIONS --
   async function updateStatus(newStatus: string) {
     if (!selectedBook) return;
-    const updatedBook = { ...selectedBook, status: newStatus };
+    const s = newStatus.toLowerCase().replace(" ", "-"); // e.g. "To Read" -> "to-read"
+    const updatedBook = { ...selectedBook, status: s };
+    
+    // Optimistic update
     selectedBook = updatedBook;
     books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
+
     try {
-      await invoke('update_book_status', { id: selectedBook.id, status: newStatus });
+      await invoke('update_book_status', { id: selectedBook.id, status: s });
     } catch (err) {
       console.error("Failed to save status:", err);
-      loadBooks();
+      loadBooks(); // Revert on error
     }
+  }
+
+  // Update Progress Logic
+  async function updateProgress(delta: number) {
+    if (!selectedBook) return;
+    
+    let newPages = selectedBook.pages_read + delta;
+    if (newPages < 0) newPages = 0;
+    if (selectedBook.total_pages > 0 && newPages > selectedBook.total_pages) {
+      newPages = selectedBook.total_pages;
+    }
+
+    const updatedBook = { ...selectedBook, pages_read: newPages };
+    
+    // If finished, auto-update status UI
+    if (updatedBook.total_pages > 0 && newPages >= updatedBook.total_pages) {
+        updatedBook.status = "finished";
+    } else if (newPages > 0 && updatedBook.status === "to-read") {
+        updatedBook.status = "reading";
+    }
+
+    selectedBook = updatedBook;
+    books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
+
+    try {
+        await invoke('update_book_progress', { id: selectedBook.id, pages_read: newPages });
+    } catch (err) {
+        console.error("Failed to update progress:", err);
+    }
+  }
+  
+  function handleManualProgressInput(e: Event) {
+      const target = e.target as HTMLInputElement;
+      const val = parseInt(target.value);
+      if (isNaN(val)) return;
+      if (!selectedBook) return;
+      
+      const diff = val - selectedBook.pages_read;
+      if (diff !== 0) updateProgress(diff);
   }
 
   function confirmDelete() { showDeleteConfirm = true; }
@@ -125,6 +165,12 @@
     } catch (err) {
       console.error("Failed to delete book:", err);
     }
+  }
+
+  // Helper for progress calculation
+  function getProgressPercent(book: Book): number {
+    if (!book.total_pages || book.total_pages === 0) return 0;
+    return Math.min(100, Math.max(0, (book.pages_read / book.total_pages) * 100));
   }
 </script>
 
@@ -147,7 +193,7 @@
           />
         </div>
 
-        <!-- SORT DROPDOWN (CUSTOM) -->
+        <!-- SORT DROPDOWN -->
         <div class="sort-controls">
           <div class="custom-select-wrapper">
             <button class="custom-select-trigger" on:click|stopPropagation={toggleSortMenu}>
@@ -222,6 +268,14 @@
               loading="lazy"
             />
           {/if}
+          
+          <!-- PROGRESS BAR ON COVER -->
+          {#if book.total_pages > 0}
+            <div class="mini-progress-bar">
+                <div class="mini-progress-fill" style="width: {getProgressPercent(book)}%"></div>
+            </div>
+          {/if}
+
           <span class="status-dot {book.status ? book.status.toLowerCase().replace(' ', '-') : ''}"></span>
         </div>
         <div class="info">
@@ -276,9 +330,26 @@
         <div class="modal-header">
           <h3>{selectedBook.title}</h3>
           <p class="modal-author">{selectedBook.author}</p>
-          {#if selectedBook.date_added}
-            <p class="modal-date">Added: {new Date(selectedBook.date_added).toLocaleDateString()}</p>
-          {/if}
+          
+          <!-- PROGRESS CONTROL -->
+          <div class="progress-section">
+             <div class="progress-info">
+                 <span class="progress-label">Progress</span>
+                 <span class="progress-text">{selectedBook.pages_read} / {selectedBook.total_pages} pages</span>
+             </div>
+             
+             <!-- Visual Bar -->
+             <div class="modal-progress-track">
+                 <div class="modal-progress-fill" style="width: {getProgressPercent(selectedBook)}%"></div>
+             </div>
+
+             <!-- Controls -->
+             <div class="progress-controls">
+                 <button class="prog-btn" on:click={() => updateProgress(-1)}>-</button>
+                 <button class="prog-btn" on:click={() => updateProgress(1)}>+</button>
+                 <button class="prog-btn" on:click={() => updateProgress(10)}>+10</button>
+             </div>
+          </div>
         </div>
 
         <div class="status-actions">
@@ -287,7 +358,7 @@
             {#each ['Reading', 'To Read', 'Finished'] as status}
               <button
                 class="status-btn {status.toLowerCase().replace(' ', '-')}"
-                class:active={selectedBook.status === status}
+                class:active={selectedBook.status === status.toLowerCase().replace(' ', '-')}
                 on:click={() => updateStatus(status)}
               >
                 {status}
@@ -335,8 +406,8 @@
 {/if}
 
 <style>
-  /* same styles as you posted, plus img sizing */
-
+  /* ... (Layout styles kept same as before) ... */
+  
   .library-content { transition: filter 0.3s ease; height: 100%; width: 100%; padding-bottom: 40px; animation: fadeIn 0.6s ease 0.6s forwards; opacity: 0; }
   .library-content.blurred { filter: blur(8px); pointer-events: none; }
 
@@ -346,6 +417,7 @@
 
   .header-controls { display: flex; gap: 12px; align-items: center; }
 
+  /* Search & Sort styles */
   .search-wrapper { position: relative; display: flex; align-items: center; }
   .search-icon { position: absolute; left: 12px; color: rgba(94, 75, 75, 0.4); pointer-events: none; }
   .search-wrapper input {
@@ -367,9 +439,6 @@
   .custom-select-wrapper { position: relative; }
   .custom-select-trigger { background: rgba(255, 255, 255, 0.4); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 12px; padding: 6px 12px; font-size: 0.85rem; color: #5e4b4b; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; font-family: 'Inter', sans-serif; transition: all 0.2s; min-width: 90px; justify-content: space-between; }
   .custom-select-trigger:hover { background: rgba(255, 255, 255, 0.6); }
-  .custom-select-trigger:focus { outline: none; }
-  .chevron { transition: transform 0.2s; opacity: 0.6; }
-  .chevron.rotated { transform: rotate(180deg); }
   .custom-options {
     position: absolute;
     top: calc(100% + 6px);
@@ -397,33 +466,12 @@
     transition: all 0.15s;
     font-weight: 500;
   }
-  .custom-option:hover {
-    background: rgba(94, 75, 75, 0.08);
-    color: #5e4b4b;
-  }
-  .custom-option.selected {
-    background: rgba(94, 75, 75, 0.15);
-    color: #5e4b4b;
-    font-weight: 600;
-  }
-  .custom-option:focus {
-    outline: none;
-  }
-  .menu-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: -1;
-    cursor: default;
-  }
+  .custom-option:hover { background: rgba(94, 75, 75, 0.08); color: #5e4b4b; }
+  .custom-option.selected { background: rgba(94, 75, 75, 0.15); color: #5e4b4b; font-weight: 600; }
+  .menu-overlay { position: fixed; inset: 0; z-index: -1; cursor: default; }
 
-  /* -- FILTERS -- */
-  .filters {
-    display: flex;
-    gap: 8px;
-  }
+  /* Filters */
+  .filters { display: flex; gap: 8px; }
   .filter-pill {
     background: rgba(255, 255, 255, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.5);
@@ -434,32 +482,18 @@
     cursor: pointer;
     transition: all 0.2s;
   }
-  .filter-pill.active {
-    background: #5e4b4b;
-    color: white;
-    border-color: transparent;
-  }
-  .filter-pill:focus {
-    outline: none;
-  }
+  .filter-pill.active { background: #5e4b4b; color: white; border-color: transparent; }
 
-  /* -- GRID -- */
+  /* Book Grid */
   .book-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 24px;
     padding-right: 10px;
   }
-  .book-card {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    cursor: pointer;
-    transition: transform 0.2s;
-  }
-  .book-card:hover {
-    transform: translateY(-8px);
-  }
+  .book-card { display: flex; flex-direction: column; gap: 12px; cursor: pointer; transition: transform 0.2s; }
+  .book-card:hover { transform: translateY(-8px); }
+  
   .cover {
     aspect-ratio: 2 / 3;
     width: 100%;
@@ -468,14 +502,8 @@
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
     overflow: hidden;
   }
-  .cover-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    position: relative;
-    z-index: 1;
-  }
+  .cover-img { width: 100%; height: 100%; object-fit: cover; display: block; position: relative; z-index: 1; }
+  
   .status-dot {
     position: absolute;
     top: 10px;
@@ -488,278 +516,99 @@
   .status-dot.reading { background: #47f386; }
   .status-dot.finished { background: #529ffd; }
   .status-dot.to-read { background: #ff4eaf; }
-
-  .info {
-    padding: 0 4px;
+  
+  /* MINI PROGRESS BAR ON COVER */
+  .mini-progress-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: rgba(0,0,0,0.2);
+      z-index: 3;
   }
-  .title {
-    font-family: 'Playfair Display', serif;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #2c1810;
-    margin: 0 0 4px 0;
-  }
-  .author {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: rgba(94, 75, 75, 0.65);
-    text-transform: uppercase;
-  }
-  .empty-state {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 40px;
-    color: rgba(94, 75, 75, 0.5);
-    font-style: italic;
+  .mini-progress-fill {
+      height: 100%;
+      background: rgba(255,255,255,0.9);
+      transition: width 0.3s ease;
   }
 
-  /* -- MODAL -- */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 240, 230, 0.4);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 100;
-    backdrop-filter: blur(4px);
-  }
-  .modal-overlay:focus {
-    outline: none;
-  }
-  .modal-card {
-    position: relative;
-    background: #fbddc8;
-    backdrop-filter: blur(20px);
-    width: 600px;
-    height: 350px;
-    border-radius: 24px;
-    box-shadow: 0 20px 60px rgba(94, 75, 75, 0.15);
-    display: flex;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.8);
-  }
-  .modal-cover {
-    width: 240px;
-    height: 100%;
-    position: relative;
-    overflow: hidden;
-  }
-  .modal-cover-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  .status-badge {
-    position: absolute;
-    top: 16px;
-    left: 16px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    background: white;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  }
+  .info { padding: 0 4px; }
+  .title { font-family: 'Playfair Display', serif; font-size: 1.1rem; font-weight: 600; color: #2c1810; margin: 0 0 4px 0; }
+  .author { font-size: 0.75rem; font-weight: 500; color: rgba(94, 75, 75, 0.65); text-transform: uppercase; }
+  .empty-state { grid-column: 1 / -1; text-align: center; padding: 40px; color: rgba(94, 75, 75, 0.5); font-style: italic; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(255, 240, 230, 0.4); display: flex; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(4px); }
+  .modal-card { position: relative; background: #fbddc8; backdrop-filter: blur(20px); width: 600px; height: 380px; border-radius: 24px; box-shadow: 0 20px 60px rgba(94, 75, 75, 0.15); display: flex; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.8); }
+  
+  .modal-cover { width: 240px; height: 100%; position: relative; overflow: hidden; }
+  .modal-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  
+  .status-badge { position: absolute; top: 16px; left: 16px; padding: 6px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; background: white; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
   .status-badge.reading { color: #47f386; }
   .status-badge.finished { color: #529ffd; }
   .status-badge.to-read { color: #ff4eaf; }
 
-  .modal-content {
-    flex: 1;
-    padding: 32px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+  .modal-content { flex: 1; padding: 32px; display: flex; flex-direction: column; justify-content: space-between; }
+  .modal-header h3 { font-family: 'Playfair Display', serif; font-size: 2rem; margin: 0 0 8px 0; color: #2c1810; line-height: 1.1; }
+  .modal-author { font-size: 0.9rem; color: rgba(94, 75, 75, 0.7); text-transform: uppercase; margin: 0; }
+  
+  /* PROGRESS SECTION IN MODAL */
+  .progress-section { margin-top: 20px; }
+  .progress-info { display: flex; justify-content: space-between; font-size: 0.8rem; color: #5e4b4b; margin-bottom: 6px; }
+  .progress-label { text-transform: uppercase; font-weight: 600; opacity: 0.6; }
+  .progress-text { font-weight: 600; }
+  
+  .modal-progress-track {
+      height: 8px;
+      width: 100%;
+      background: rgba(255,255,255,0.4);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
   }
-  .modal-header h3 {
-    font-family: 'Playfair Display', serif;
-    font-size: 2rem;
-    margin: 0 0 8px 0;
-    color: #2c1810;
-    line-height: 1.1;
+  .modal-progress-fill {
+      height: 100%;
+      background: #5e4b4b;
+      transition: width 0.3s ease;
   }
-  .modal-author {
-    font-size: 0.9rem;
-    color: rgba(94, 75, 75, 0.7);
-    text-transform: uppercase;
-    margin: 0;
+  .progress-controls { display: flex; gap: 6px; }
+  .prog-btn {
+      background: rgba(255,255,255,0.4);
+      border: 1px solid rgba(255,255,255,0.6);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      color: #5e4b4b;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
   }
-  .modal-date {
-    font-size: 0.7rem;
-    color: rgba(94, 75, 75, 0.4);
-    margin-top: 4px;
-  }
-  .label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: rgba(94, 75, 75, 0.5);
-    text-transform: uppercase;
-    margin-bottom: 12px;
-  }
-  .action-buttons {
-    display: flex;
-    gap: 10px;
-  }
+  .prog-btn:hover { background: rgba(255,255,255,0.7); transform: translateY(-1px); }
 
-  .status-btn {
-    flex: 1;
-    padding: 12px;
-    border: none;
-    border-radius: 12px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    background: #5e4b4b;
-    color: rgba(255, 255, 255, 0.9);
-    opacity: 0.9;
-  }
-  .status-btn:hover {
-    opacity: 1;
-    transform: translateY(-1px);
-  }
-  .status-btn:focus {
-    outline: none;
-  }
-  .status-btn.reading:hover,
-  .status-btn.reading.active {
-    background: #47f386;
-    color: white;
-    box-shadow: 0 4px 12px rgba(71, 243, 134, 0.3);
-  }
-  .status-btn.to-read:hover,
-  .status-btn.to-read.active {
-    background: #ff4eaf;
-    color: white;
-    box-shadow: 0 4px 12px rgba(255, 78, 175, 0.3);
-  }
-  .status-btn.finished:hover,
-  .status-btn.finished.active {
-    background: #529ffd;
-    color: white;
-    box-shadow: 0 4px 12px rgba(82, 159, 253, 0.3);
-  }
+  .label { font-size: 0.8rem; font-weight: 600; color: rgba(94, 75, 75, 0.5); text-transform: uppercase; margin-bottom: 12px; }
+  .action-buttons { display: flex; gap: 10px; }
+  .status-btn { flex: 1; padding: 12px; border: none; border-radius: 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; background: #5e4b4b; color: rgba(255, 255, 255, 0.9); opacity: 0.9; }
+  .status-btn:hover { opacity: 1; transform: translateY(-1px); }
+  .status-btn.reading:hover, .status-btn.reading.active { background: #47f386; color: white; box-shadow: 0 4px 12px rgba(71, 243, 134, 0.3); }
+  .status-btn.to-read:hover, .status-btn.to-read.active { background: #ff4eaf; color: white; box-shadow: 0 4px 12px rgba(255, 78, 175, 0.3); }
+  .status-btn.finished:hover, .status-btn.finished.active { background: #529ffd; color: white; box-shadow: 0 4px 12px rgba(82, 159, 253, 0.3); }
 
-  .modal-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-  }
-  .delete-btn {
-    background: transparent;
-    border: none;
-    color: rgba(255, 98, 98, 0.7);
-    cursor: pointer;
-    transition: all 0.2s;
-    padding: 8px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .delete-btn:hover {
-    background: rgba(200, 50, 50, 0.1);
-    color: rgba(200, 50, 50, 0.8);
-    transform: scale(1.09);
-  }
-  .delete-btn:focus {
-    outline: none;
-  }
-  .close-btn {
-    background: transparent;
-    border: 1.5px solid #5e4b4b;
-    padding: 8px 24px;
-    border-radius: 24px;
-    color: #5e4b4b;
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s;
-    opacity: 0.8;
-  }
-  .close-btn:hover {
-    background: #5e4b4b;
-    color: white;
-    opacity: 1;
-  }
-  .close-btn:focus {
-    outline: none;
-  }
+  .modal-footer { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+  .delete-btn { background: transparent; border: none; color: rgba(255, 98, 98, 0.7); cursor: pointer; transition: all 0.2s; padding: 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+  .delete-btn:hover { background: rgba(200, 50, 50, 0.1); color: rgba(200, 50, 50, 0.8); transform: scale(1.09); }
+  .close-btn { background: transparent; border: 1.5px solid #5e4b4b; padding: 8px 24px; border-radius: 24px; color: #5e4b4b; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; opacity: 0.8; }
+  .close-btn:hover { background: #5e4b4b; color: white; opacity: 1; }
 
-  .delete-confirm-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(255, 234, 219, 0.685);
-    backdrop-filter: blur(5px);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 50;
-    border-radius: 24px;
-  }
-  .delete-confirm-card {
-    background: #ffd3d3ce;
-    padding: 24px;
-    border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-    text-align: center;
-    border: 1px solid rgba(200, 50, 50, 0.1);
-    width: 80%;
-  }
-  .delete-confirm-card h4 {
-    margin: 0 0 8px 0;
-    color: #4a3b3b;
-    font-size: 1.1rem;
-  }
-  .delete-confirm-card p {
-    margin: 0 0 20px 0;
-    font-size: 0.85rem;
-    color: rgba(94, 75, 75, 0.6);
-  }
-  .confirm-actions {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-  }
-  .cancel-btn {
-    background: rgba(94, 75, 75, 0.1);
-    color: #5e4b4b;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .cancel-btn:hover {
-    background: rgba(94, 75, 75, 0.2);
-  }
-  .confirm-delete-btn {
-    background: #ff4e4e;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(255, 78, 78, 0.3);
-  }
-  .confirm-delete-btn:hover {
-    background: #d93636;
-  }
+  /* Delete Confirm Styles (Same as before) */
+  .delete-confirm-overlay { position: absolute; inset: 0; background: rgba(255, 234, 219, 0.685); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 50; border-radius: 24px; }
+  .delete-confirm-card { background: #ffd3d3ce; padding: 24px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); text-align: center; border: 1px solid rgba(200, 50, 50, 0.1); width: 80%; }
+  .delete-confirm-card h4 { margin: 0 0 8px 0; color: #4a3b3b; font-size: 1.1rem; }
+  .delete-confirm-card p { margin: 0 0 20px 0; font-size: 0.85rem; color: rgba(94, 75, 75, 0.6); }
+  .confirm-actions { display: flex; gap: 12px; justify-content: center; }
+  .cancel-btn { background: rgba(94, 75, 75, 0.1); color: #5e4b4b; border: none; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+  .confirm-delete-btn { background: #ff4e4e; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(255, 78, 78, 0.3); }
 
-  @keyframes fadeIn {
-    to { opacity: 1; }
-  }
+  @keyframes fadeIn { to { opacity: 1; } }
 </style>
