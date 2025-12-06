@@ -104,6 +104,18 @@ async fn add_book(
     // For now, we only optimize the network request which is the main bottleneck.
     let mut books = get_books(app.clone());
 
+    // --- DUPLICATE CHECK START ---
+    // Check if a book with the same title and author already exists (case-insensitive)
+    let exists = books.iter().any(|b| 
+        b.title.eq_ignore_ascii_case(&title) && 
+        b.author.eq_ignore_ascii_case(&author)
+    );
+
+    if exists {
+        return Err("Book already exists in library".to_string());
+    }
+    // --- DUPLICATE CHECK END ---
+
     // We clone data needed for the thread
     let app_handle_clone = app.clone();
     let cover_url_clone = cover.clone();

@@ -5,11 +5,11 @@
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { fade, scale } from 'svelte/transition'; // Import transitions
+  import { fade, scale, fly } from 'svelte/transition'; // Added 'fly'
 
   // UI state
   let bookTitle = "";
-  let isPulsing = false; // This triggers the orb glow up
+  let isPulsing = false;
   let isFocused = false;
   let activeTab: "home" | "menu" = "home";
   let previousTab: "home" | "menu" = activeTab;
@@ -22,6 +22,9 @@
   // Search / result state
   type SearchState = "idle" | "loading" | "result";
   let searchState: SearchState = "idle";
+
+  // --- NEW STATE FOR DUPLICATE TOAST ---
+  let showDuplicateToast = false;
 
   type MockBook = {
     title: string;
@@ -135,16 +138,12 @@
     searchState === "loading" ||
     searchState === "result" ||
     isAdding ||
-    isPulsing; // Add isPulsing here so orb glows when saving
+    isPulsing;
 
   $: shouldScale = (isFocused && activeTab === "home" && !isReturning) || isPulsing;
 
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
-    // Small pulse on typing
-    // isPulsing = true; 
-    // setTimeout(() => (isPulsing = false), 100); 
-    // Commented out to prioritize save pulse, or keep if you like it
   }
 
   function handleFocus(_event: CustomEvent<FocusEvent>) {
@@ -293,14 +292,8 @@
     const safePagesRead = Number.isNaN(pages_read) || pages_read < 0 ? 0 : pages_read;
     const safeTotalPages = Number.isNaN(total_pages) || total_pages < 0 ? 0 : total_pages;
 
-    // 1. TRIGGER ORB GLOW ANIMATION
-    isPulsing = true; // Grows the orb
-    setTimeout(() => { isPulsing = false; }, 600); // Reset after animation
+    isAdding = true;
 
-    // 2. FADE OUT DIALOG (By setting showAddDialog to false)
-    showAddDialog = false;
-    isAdding = false;
-    
     const payload = {
         title: pendingBook.title,
         author: pendingBook.author,
@@ -310,12 +303,38 @@
         totalPages: safeTotalPages,
     };
 
-    pendingBook = null;
-    resetSearch();
-
     invoke('add_book', payload)
-      .then((saved) => console.log("Book saved:", saved))
-      .catch((err) => console.error("Save failed:", err));
+      .then((saved) => {
+        // SUCCESS
+        console.log("Book saved:", saved);
+
+        // Trigger Orb Pulse
+        isPulsing = true;
+        setTimeout(() => { isPulsing = false; }, 600);
+
+        // Close Dialog
+        showAddDialog = false;
+        pendingBook = null;
+        resetSearch();
+      })
+      .catch((err) => {
+        // ERROR (DUPLICATE)
+        console.error("Save failed:", err);
+        
+        // Show the custom toast instead of alert
+        triggerDuplicateToast();
+      })
+      .finally(() => {
+        isAdding = false;
+      });
+  }
+  
+  // Helper to show duplicate toast
+  function triggerDuplicateToast() {
+      showDuplicateToast = true;
+      setTimeout(() => {
+          showDuplicateToast = false;
+      }, 3000); // Hide after 3 seconds
   }
 
   async function handleDone() {
@@ -445,7 +464,6 @@
   {/if}
 
   {#if showAddDialog && pendingBook}
-    <!-- FADE TRANSITION ADDED HERE -->
     <div class="add-overlay" transition:fade={{ duration: 250 }}>
       <div class="add-dialog">
         <div class="add-header">
@@ -537,10 +555,27 @@
       </div>
     </div>
   {/if}
+
+  <!-- NEW DUPLICATE TOAST NOTIFICATION -->
+  {#if showDuplicateToast}
+    <div 
+        class="toast-overlay" 
+        transition:fly={{ y: 30, duration: 400, opacity: 0 }}
+    >
+        <div class="toast-card">
+            <div class="toast-icon">!</div>
+            <div class="toast-content">
+                <h4>Book Exists</h4>
+                <p>This book is already in your library.</p>
+            </div>
+        </div>
+    </div>
+  {/if}
+
 </main>
 
 <style>
-  /* ... (Global/Layout Styles) ... */
+  /* ... (Previous Global/Layout Styles) ... */
   main {
     display: flex;
     height: 100vh;
@@ -567,8 +602,67 @@
   .library-container.fade-out {
     opacity: 0;
   }
+  
+  /* --- TOAST STYLES --- */
+  .toast-overlay {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      pointer-events: none; /* Allows clicking through if needed */
+  }
 
-  /* Summary modal */
+  .toast-card {
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 16px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 
+          0 10px 30px rgba(200, 100, 100, 0.15),
+          inset 0 0 20px rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(255, 200, 200, 0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      min-width: 300px;
+  }
+
+  .toast-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #ff9a9e, #fecfef);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 1.1rem;
+      box-shadow: 0 4px 10px rgba(255, 154, 158, 0.4);
+  }
+
+  .toast-content {
+      display: flex;
+      flex-direction: column;
+  }
+
+  .toast-content h4 {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #8e4a4a;
+  }
+
+  .toast-content p {
+      margin: 2px 0 0;
+      font-size: 0.85rem;
+      color: #8e4a4a;
+      opacity: 0.8;
+  }
+
+  /* ... (Summary, Add Dialog, Button styles kept exactly as before) ... */
   .summary-overlay {
     position: fixed;
     inset: 0;
@@ -663,7 +757,6 @@
     flex-direction: column;
     gap: 16px;
     transform-origin: center;
-    /* Used standard svelte fade, removed custom animation here to avoid conflicts */
   }
 
   .add-header h3 {
@@ -822,7 +915,7 @@
     margin-top: 6px;
   }
 
-  /* -- UPDATED BUTTON STYLES -- */
+  /* -- BUTTON STYLES -- */
   .pill-btn {
     min-width: 90px;
     padding: 8px 20px;
@@ -845,20 +938,21 @@
     color: #5b3b30;
   }
   
-  /* Save button: Ghost by default, Colorful only on Active/Click */
+  /* Save button: Ghost by default */
   .pill-primary {
-    background: rgba(255, 255, 255, 0.5); /* Ghost-ish default */
+    background: rgba(255, 255, 255, 0.5); 
     color: #4b332e;
     box-shadow: 0 4px 12px rgba(200, 120, 90, 0.15);
   }
 
+  /* Hover: Slight Opacity Boost */
   .pill-primary:hover {
-    background: rgba(255, 255, 255, 0.75); /* Slightly more opaque on hover */
+    background: rgba(255, 255, 255, 0.75);
     transform: translateY(-1px);
     box-shadow: 0 8px 20px rgba(200, 120, 90, 0.2);
   }
 
-  /* The "Burst" color effect only happens when clicking (active) */
+  /* Active/Click: Colorful Burst */
   .pill-primary:active {
     background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
     color: #2c1810;
