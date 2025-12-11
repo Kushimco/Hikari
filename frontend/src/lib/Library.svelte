@@ -395,24 +395,34 @@
           <div class="progress-section">
              <div class="progress-info">
                  <span class="progress-label">Progress</span>
-                 <div class="progress-edit-wrapper">
-                    {#if isEditingProgress}
-                      <input 
-                        type="number" 
-                        class="progress-input"
-                        value={selectedBook.pages_read}
-                        use:focusInput
-                        on:input={handleInput}
-                        on:keydown={blockInvalidChars}
-                        on:blur={finishEditing}
-                      />
-                    {:else}
-                      <button class="progress-text clickable" on:click={toggleEditProgress} title="Click to edit">
-                        {selectedBook.pages_read}
-                      </button>
-                    {/if}
-                    <span class="progress-total"> / {selectedBook.total_pages} pages</span>
-                 </div>
+                 <!-- SEPARATED STATES FOR CLEANER ACCESSIBILITY -->
+                 {#if isEditingProgress}
+                   <!-- EDIT MODE: A simple container div for the input -->
+                   <div class="progress-edit-wrapper" role="group" aria-label="Edit pages read">
+                     <input 
+                       type="number" 
+                       class="progress-input"
+                       value={selectedBook.pages_read}
+                       use:focusInput
+                       on:input={handleInput}
+                       on:keydown={blockInvalidChars}
+                       on:blur={finishEditing}
+                     />
+                     <span class="progress-total"> / {selectedBook.total_pages} pages</span>
+                   </div>
+                 {:else}
+                   <!-- VIEW MODE: A real button for interactivity -->
+                   <button 
+                     class="progress-edit-wrapper" 
+                     on:click={toggleEditProgress}
+                     aria-label="Change pages read"
+                   >
+                     <span class="progress-text clickable" title="Click to edit">
+                       {selectedBook.pages_read}
+                     </span>
+                     <span class="progress-total"> / {selectedBook.total_pages} pages</span>
+                   </button>
+                 {/if}
              </div>
              
              <!-- Visual Bar -->
@@ -634,42 +644,73 @@
   .progress-info { display: flex; justify-content: space-between; font-size: 0.8rem; color: #5e4b4b; margin-bottom: 6px; align-items: center; }
   .progress-label { text-transform: uppercase; font-weight: 600; opacity: 0.6; }
   
-  .progress-edit-wrapper { display: flex; align-items: baseline; gap: 4px; font-weight: 600; }
+  /* UPDATED: Wrapper is now an interactive pill/badge */
+  .progress-edit-wrapper { 
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    font-weight: 600; 
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.4); /* Subtle background pill */
+    padding: 4px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    transition: all 0.2s ease;
+  }
+  .progress-edit-wrapper:hover {
+    background: rgba(255, 255, 255, 0.6);
+    border-color: rgba(255, 255, 255, 0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(94, 75, 75, 0.05);
+  }
+
+  /* UPDATED: Text is cleaner, no dashed underline */
   .progress-text.clickable { 
       background: none; 
       border: none; 
       padding: 0; 
-      font-size: 0.8rem; 
+      font-size: 0.9rem; 
       font-weight: 700; 
-      color: #5e4b4b; 
+      color: #2c1810; 
       cursor: pointer; 
-      border-bottom: 1px dashed rgba(94,75,75,0.4); 
       transition: color 0.2s;
   }
-  .progress-text.clickable:hover { color: #2c1810; border-bottom-color: #2c1810; }
   
+  /* UPDATED: Input now matches the theme (soft, inset shadow, less harsh) */
   .progress-input {
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid #5e4b4b;
-      width: 40px;
+      background: rgba(255, 255, 255, 0.5); /* Semi-transparent */
+      border: 1px solid rgba(94, 75, 75, 0.3); /* Softer border color */
+      border-radius: 8px; /* Slightly rounder */
+      width: 50px;
       font-family: inherit;
-      font-size: 0.8rem;
+      font-size: 0.9rem;
       font-weight: 700;
-      color: #2c1810;
-      text-align: right;
-      padding: 0;
+      color: #4a3b3b;
+      text-align: center;
+      padding: 2px 4px;
       outline: none;
-      -moz-appearance: textfield; /* Firefox: remove spinner */
+      -moz-appearance: textfield; 
       appearance: textfield;
+      box-shadow: inset 0 1px 4px rgba(94, 75, 75, 0.1); /* Inner shadow for depth */
+      transition: all 0.2s ease;
   }
-  /* Remove spinners in Chrome/Safari/Edge */
+  .progress-input:focus {
+      background: rgba(255, 255, 255, 0.8);
+      border-color: #5e4b4b;
+      box-shadow: inset 0 1px 4px rgba(94, 75, 75, 0.05), 0 0 0 2px rgba(94, 75, 75, 0.1);
+  }
   .progress-input::-webkit-outer-spin-button,
   .progress-input::-webkit-inner-spin-button {
       -webkit-appearance: none;
       margin: 0;
   }
   
+  .progress-total {
+    font-size: 0.85rem;
+    color: rgba(94, 75, 75, 0.6);
+    font-weight: 500;
+  }
+
   .modal-progress-track {
       height: 8px;
       width: 100%;
