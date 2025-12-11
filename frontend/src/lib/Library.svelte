@@ -14,8 +14,8 @@
     cover_color: string;
     status: string;
     date_added?: string;
-    total_pages: number;  // Added
-    pages_read: number;   // Added
+    total_pages: number;  
+    pages_read: number;   
   };
 
   // -- STATE --
@@ -35,7 +35,7 @@
   async function loadBooks() {
     try {
       books = await invoke<Book[]>('get_books');
-      console.log("Loaded books:", books);
+      console.log("Initial load:", books);
     } catch (err) {
       console.error("Failed to load books:", err);
     }
@@ -56,7 +56,7 @@
     const matchesStatus =
       activeFilter === 'All'
         ? true
-        : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-'); // handle 'To Read' -> 'to-read'
+        : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-'); 
 
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
@@ -89,16 +89,46 @@
     showSortMenu = false;
   }
 
-  function openBook(book: Book) { selectedBook = book; }
-  function closeBook() {
+  // --- OPEN BOOK (Logs Info) ---
+  function openBook(book: Book) { 
+    console.log("OPENING BOOK - Current Info:", book);
+    selectedBook = book; 
+  }
+
+  // --- CLOSE BOOK (Saves Progress to Backend) ---
+  async function closeBook() {
+    if (selectedBook) {
+      const finalBookState = selectedBook; 
+      console.log(`[CLOSE] Closing modal. Saving progress: ${finalBookState.pages_read} pages.`);
+
+      try {
+        // FIX: Change 'pages_read' (key) to 'pagesRead'
+        // Tauri expects camelCase keys for Rust arguments
+        await invoke('update_book_progress', { 
+          id: finalBookState.id, 
+          pagesRead: finalBookState.pages_read 
+        });
+        
+        // Status is one word, so it stays the same
+        await invoke('update_book_status', {
+           id: finalBookState.id,
+           status: finalBookState.status 
+        });
+        
+        console.log("[CLOSE] Save successful.");
+
+      } catch (err) {
+        console.error("[CLOSE] Failed to save:", err);
+      }
+    }
+
     selectedBook = null;
     showDeleteConfirm = false;
   }
-
   // -- BOOK ACTIONS --
   async function updateStatus(newStatus: string) {
     if (!selectedBook) return;
-    const s = newStatus.toLowerCase().replace(" ", "-"); // e.g. "To Read" -> "to-read"
+    const s = newStatus.toLowerCase().replace(" ", "-");
     const updatedBook = { ...selectedBook, status: s };
     
     // Optimistic update
@@ -109,37 +139,35 @@
       await invoke('update_book_status', { id: selectedBook.id, status: s });
     } catch (err) {
       console.error("Failed to save status:", err);
-      loadBooks(); // Revert on error
+      loadBooks(); 
     }
   }
 
-  // Update Progress Logic
-  async function updateProgress(delta: number) {
+  // -- PROGRESS LOGIC (UI Only - No Backend Call) --
+  function updateProgress(delta: number) {
     if (!selectedBook) return;
-    
+
     let newPages = selectedBook.pages_read + delta;
+    
+    // Boundary checks
     if (newPages < 0) newPages = 0;
     if (selectedBook.total_pages > 0 && newPages > selectedBook.total_pages) {
       newPages = selectedBook.total_pages;
     }
 
+    // Create updated object
     const updatedBook = { ...selectedBook, pages_read: newPages };
-    
-    // If finished, auto-update status UI
+
+    // Auto-update status
     if (updatedBook.total_pages > 0 && newPages >= updatedBook.total_pages) {
-        updatedBook.status = "finished";
+      updatedBook.status = "finished";
     } else if (newPages > 0 && updatedBook.status === "to-read") {
-        updatedBook.status = "reading";
+      updatedBook.status = "reading";
     }
 
+    // Update Svelte state only
     selectedBook = updatedBook;
     books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
-
-    try {
-        await invoke('update_book_progress', { id: selectedBook.id, pages_read: newPages });
-    } catch (err) {
-        console.error("Failed to update progress:", err);
-    }
   }
   
   function handleManualProgressInput(e: Event) {
@@ -406,8 +434,6 @@
 {/if}
 
 <style>
-  /* ... (Layout styles kept same as before) ... */
-  
   .library-content { transition: filter 0.3s ease; height: 100%; width: 100%; padding-bottom: 40px; animation: fadeIn 0.6s ease 0.6s forwards; opacity: 0; }
   .library-content.blurred { filter: blur(8px); pointer-events: none; }
 
@@ -601,7 +627,7 @@
   .close-btn { background: transparent; border: 1.5px solid #5e4b4b; padding: 8px 24px; border-radius: 24px; color: #5e4b4b; font-weight: 600; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; opacity: 0.8; }
   .close-btn:hover { background: #5e4b4b; color: white; opacity: 1; }
 
-  /* Delete Confirm Styles (Same as before) */
+  /* Delete Confirm Styles */
   .delete-confirm-overlay { position: absolute; inset: 0; background: rgba(255, 234, 219, 0.685); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 50; border-radius: 24px; }
   .delete-confirm-card { background: #ffd3d3ce; padding: 24px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); text-align: center; border: 1px solid rgba(200, 50, 50, 0.1); width: 80%; }
   .delete-confirm-card h4 { margin: 0 0 8px 0; color: #4a3b3b; font-size: 1.1rem; }

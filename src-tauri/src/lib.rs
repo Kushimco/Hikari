@@ -209,36 +209,61 @@ fn delete_book(app: tauri::AppHandle, id: String) -> Result<(), String> {
     }
 }
 
+
 #[tauri::command]
 fn update_book_progress(app: tauri::AppHandle, id: String, pages_read: u32) -> Result<(), String> {
+    // 1. Get the real path (Usually AppData/Roaming/com.your.app/library.json)
     let path = get_db_path(&app);
+    println!("DEBUG: Updating book {}. New pages: {}. File Location: {:?}", id, pages_read, path);
 
-    if !path.exists() {
-        return Err("Library file not found".to_string());
-    }
+    // 2. Read the file
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => return Err(format!("Failed to read file: {}", e)),
+    };
 
-    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut books: Vec<Book> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    // 3. Parse JSON
+    let mut books: Vec<Book> = match serde_json::from_str(&content) {
+        Ok(b) => b,
+        Err(e) => return Err(format!("Failed to parse JSON: {}", e)),
+    };
 
-    if let Some(book) = books.iter_mut().find(|b| b.id == id) {
-        book.pages_read = pages_read;
-        
-        // Smart Status Update
-        if book.total_pages > 0 && book.pages_read >= book.total_pages {
-             book.status = "finished".to_string();
-             book.pages_read = book.total_pages; // cap it
-        } else if book.pages_read > 0 && book.status == "to-read" {
-             book.status = "reading".to_string();
+    // 4. Find and Update the book
+    let mut found = false;
+    for book in &mut books {
+        if book.id == id {
+            book.pages_read = pages_read;
+
+            // Logic: Auto-update status if finished
+            if book.total_pages > 0 && book.pages_read >= book.total_pages {
+                book.status = "finished".to_string();
+                book.pages_read = book.total_pages; // Clamp to max
+            } else if book.pages_read > 0 && book.status == "to-read" {
+                book.status = "reading".to_string();
+            }
+            
+            found = true;
+            break;
         }
-    } else {
-        return Err("Book not found".to_string());
     }
 
-    let new_data = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
-    fs::write(path, new_data).map_err(|e| e.to_string())?;
+    if !found {
+        println!("DEBUG: Book ID {} not found in json.", id);
+        return Err("Book ID not found".to_string());
+    }
 
+    // 5. Write BACK to the file
+    let json_output = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
+    
+    if let Err(e) = fs::write(&path, json_output) {
+        println!("DEBUG: Write FAILED: {}", e);
+        return Err(format!("Failed to write file: {}", e));
+    }
+
+    println!("DEBUG: Successfully saved changes to {:?}", path);
     Ok(())
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
