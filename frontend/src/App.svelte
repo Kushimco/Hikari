@@ -1,357 +1,83 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import Sidebar from './lib/Sidebar.svelte';
-  import Library from './lib/Library.svelte';
+  import Home from './lib/Home.svelte';
 
   const appWindow = getCurrentWindow();
 
-  /* Closes the application window.*/
   async function closeApp() {
     await appWindow.close();
   }
-
-  // -- STATE --
-  let bookTitle = "";
-  let isPulsing = false; // Visual feedback on keystroke
-  let isFocused = false; // Input focus state
-  let activeTab = 'home'; // Navigation: 'home' or 'menu'
-
-  // Derived: Triggers attention scale only on Home focus
-  $: shouldScale = isFocused && activeTab === 'home';
-
-  // -- HANDLERS --
-
-  function handleInput() {
-    // Only pulse on Home to avoid visual noise elsewhere
-    if (activeTab !== 'home') return;
-    isPulsing = true;
-    setTimeout(() => (isPulsing = false), 100);
-  }
-
-  function handleFocus() {
-    if (activeTab === 'home') isFocused = true;
-  }
-
-  function handleBlur() {
-    isFocused = false;
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && bookTitle.trim()) {
-      console.log("Submitting:", bookTitle);
-      bookTitle = ""; 
-    }
-  }
 </script>
 
-<!-- Top Right Exit Button (Fixed Position) -->
-<div data-tauri-drag-region class="titlebar">
-  <button class="exit-btn" on:click={closeApp} aria-label="Close application">
-    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"></line>
-      <line x1="6" y1="6" x2="18" y2="18"></line>
-    </svg>
-  </button>
+<div class="app-shell">
+  <div data-tauri-drag-region class="titlebar">
+    <button class="exit-btn" on:click={closeApp} aria-label="Close app">
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        stroke="currentColor"
+        stroke-width="2.5"
+        fill="none"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
+  </div>
+
+  <Home />
 </div>
 
-<main>
-  <!-- Background Ambient Effects -->
-  <div class="ambient-light one"></div>
-  <div class="ambient-light two"></div>
-
-  <!-- Sidebar Navigation -->
-  <Sidebar bind:activeTab={activeTab} />
-
-  <!-- Main Content Stage -->
-  <section class="orb-stage">
-    <div 
-      class="orb-floater" 
-      class:expanded-floater={activeTab === 'menu'} 
-      class:focused={isFocused}
-    >
-      <!-- 
-         Orb Component
-         - .expanded: Library view (morphs shape + permanent glow)
-         - .listening: Focus glow (Home only)
-         - .typing-scale: Focus scale (Home only)
-         - .pulsing: Keystroke bounce
-      -->
-      <div 
-        class="orb" 
-        class:expanded={activeTab === 'menu'} 
-        class:listening={isFocused && activeTab === 'home'}
-        class:typing-scale={shouldScale}
-        class:pulsing={isPulsing && activeTab === 'home'}
-      >
-        {#if activeTab === 'home'}
-          <div class="glass-capsule">
-            <input 
-              type="text" 
-              bind:value={bookTitle} 
-              placeholder="What are you reading?"
-              on:input={handleInput}
-              on:keydown={handleKeydown}
-              on:focus={handleFocus}
-              on:blur={handleBlur}
-            />
-          </div>
-        {:else if activeTab === 'menu'}
-          <Library />
-        {/if}
-      </div>
-    </div>
-  </section>
-</main>
-
 <style>
-  /* -- GLOBAL LAYOUT -- */
   :global(body) {
     margin: 0;
-    background: linear-gradient(180deg, #FFF8F3 0%, #DEAA84 100%);
+    background: linear-gradient(180deg, #fff8f3 0%, #deaa84 100%);
     min-height: 100vh;
     height: 100vh;
     overflow: hidden;
-    font-family: 'Inter', sans-serif;
+    font-family: "Inter", sans-serif;
   }
 
-  main { 
-    display: flex; 
-    height: 100vh; 
-    width: 100vw; 
-    position: relative; 
+  .app-shell {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
   }
 
-  /* -- TITLEBAR & EXIT BUTTON -- */
   .titlebar {
-    height: 40px; 
-    width: 100vw; 
-    position: fixed; 
-    top: 0; 
-    left: 0; 
+    height: 40px;
+    width: 100vw;
+    position: fixed;
+    top: 0;
+    left: 0;
     z-index: 9999;
-    cursor: default; 
-    pointer-events: auto;
-    display: flex; 
-    justify-content: flex-end; 
+    display: flex;
+    justify-content: flex-end;
     align-items: center;
-    padding-right: 20px; 
+    padding-right: 20px;
     box-sizing: border-box;
+    pointer-events: auto;
   }
 
   .exit-btn {
-    background: transparent; 
-    border: none; 
+    background: transparent;
+    border: none;
     cursor: pointer;
-    color: rgba(41, 32, 27, 0.4); 
-    padding: 8px; 
+    color: rgba(41, 32, 27, 0.4);
+    padding: 8px;
     border-radius: 50%;
-    display: flex; 
-    align-items: center; 
+    display: flex;
+    align-items: center;
     justify-content: center;
-    transition: all 0.2s ease; 
-    -webkit-app-region: no-drag; 
+    transition: all 0.2s ease;
   }
 
   .exit-btn:hover {
     background: rgba(41, 32, 27, 0.1);
     color: rgba(41, 32, 27, 0.8);
     transform: scale(1.1);
-  }
-
-  /* -- BACKGROUND ANIMATION -- */
-  .ambient-light { 
-    position: absolute; 
-    border-radius: 50%; 
-    filter: blur(80px); 
-    opacity: 0.4; 
-    z-index: 0; 
-    animation: floatBlob 20s infinite ease-in-out alternate; 
-  }
-  .one { width: 600px; height: 600px; background: #ffffff; top: -200px; left: -100px; }
-  .two { width: 500px; height: 500px; background: #ffd1bc; bottom: -150px; right: -100px; }
-
-  @keyframes floatBlob { 
-    0% { transform: translate(0, 0); } 
-    100% { transform: translate(40px, 60px); } 
-  }
-
-  /* -- ORB STAGE & FLOATING LOGIC -- */
-  .orb-stage { 
-    flex: 1; 
-    display: flex; 
-    justify-content: center; 
-    align-items: center; 
-    position: relative; 
-    z-index: 5; 
-  }
-  
-  @keyframes float {
-    0% { transform: translateY(0px); }
-    25% { transform: translateY(-12px); }
-    75% { transform: translateY(12px); }
-    100% { transform: translateY(0px); }
-  }
-
-  .orb-floater { 
-    width: 780px; 
-    height: 780px; 
-    margin-left: -200px; 
-    display: flex; 
-    justify-content: center; 
-    align-items: center; 
-    will-change: transform; 
-    animation: float 8s ease-in-out infinite; 
-    
-    transition: 
-      transform 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      margin 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      width 1.5s cubic-bezier(0.25, 1, 0.5, 1),      
-      height 1.5s cubic-bezier(0.25, 1, 0.5, 1);
-  }
-
-  /* Stop floating when interacting */
-  .orb-floater.expanded-floater,
-  .orb-floater.focused {
-    animation: none;          
-    transform: translateY(0); 
-  }
-
-  .orb-floater.expanded-floater {
-    width: 96%;
-    height: 95%;
-    margin-left: 0;
-    padding: 20px; 
-    padding-right: 75px; 
-    box-sizing: border-box; 
-  }
-
-  /* -- ORB CORE STYLING -- */
-  .orb {
-    width: 100%; 
-    height: 100%; 
-    border-radius: 50%;
-    background: linear-gradient(180deg, rgb(254, 214, 169) 0%, rgba(244, 202, 167, 0.9) 60%, rgba(255, 189, 245, 0.7) 90%);
-    box-shadow: inset 2px 4px 20px rgba(255, 255, 255, 0.6), inset -2px -4px 30px rgba(0, 0, 0, 0.05), 0 25px 60px rgba(219, 168, 172, 0.35);        
-    display: flex; 
-    justify-content: center; 
-    align-items: center;
-    max-width: 780px;
-    max-height: 780px;
-    
-    transition: 
-      box-shadow 1.2s ease,
-      filter 1.2s ease,
-      transform 0.1s cubic-bezier(0.4, 0, 0.2, 1),
-      width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      background 1.5s ease;
-  }
-  
-  /* -- INTERACTION STATES -- */
-
-  /* 1. Home Focus (Glow Only) */
-  .orb.listening {
-    box-shadow: 
-      inset 0 0 30px rgba(255, 255, 255, 0.9),
-      0 0 120px rgba(255, 220, 180, 0.8),
-      0 0 200px rgba(255, 200, 150, 0.4);
-    filter: brightness(1.05);
-    
-    transition: 
-      box-shadow 0.3s ease-out,
-      filter 0.3s ease-out,
-      width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-      background 1.5s ease;
-  }
-
-  /* 2. Home Focus (Scale) */
-  .orb.typing-scale {
-    transform: scale(1.02);
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  /* 3. Keystroke Bounce */
-  .orb.pulsing { 
-    transform: scale(1.05) !important; 
-    transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1); 
-  }
-
-  /* 4. Library View (Morph + Delayed Glow) */
-  .orb.expanded {
-    border-radius: 40px; 
-    width: 100%;          
-    height: 100%;         
-    max-width: 100%;     
-    max-height: 100%;
-    display: block;      
-    padding: 40px;
-    box-sizing: border-box;
-    overflow-y: auto;    
-    cursor: default;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-
-    /* Reset scale for card view */
-    transform: scale(1) !important; 
-
-    /* Permanent Glow */
-    box-shadow: 
-      inset 0 0 30px rgba(255, 255, 255, 0.9),
-      0 0 120px rgba(255, 220, 180, 0.8),
-      0 0 200px rgba(255, 200, 150, 0.4);
-    filter: brightness(1.05);
-
-    /* Transition: Delayed glow (0.3s) allows shape morph first */
-    transition: 
-        transform 0s, 
-        width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-        height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-        border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
-        background 1.5s ease,
-        box-shadow 1.5s ease-in-out 0.3s,
-        filter 1.5s ease-in-out 0.3s;
-  }
-
-  .orb.expanded::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* -- INPUT CAPSULE -- */
-  .glass-capsule { 
-    background: rgba(255, 255, 255, 0.3); 
-    backdrop-filter: blur(16px); 
-    -webkit-backdrop-filter: blur(16px); 
-    padding: 18px 36px; 
-    border-radius: 100px; 
-    border: 1px solid rgba(255, 255, 255, 0.5); 
-    box-shadow: 0 8px 32px rgba(0,0,0,0.05); 
-    width: 340px; 
-    transition: all 0.3s ease; 
-    will-change: transform; 
-  }
-
-  .glass-capsule:focus-within { 
-    transform: scale(1.03); 
-    background: rgba(255, 255, 255, 0.45); 
-    box-shadow: 0 12px 40px rgba(0,0,0,0.08); 
-  }
-
-  input { 
-    width: 100%; 
-    background: transparent; 
-    border: none; 
-    outline: none; 
-    font-size: 1.2rem; 
-    color: #5e4b4b; 
-    text-align: center; 
-    font-weight: 500; 
-    font-family: 'Inter', sans-serif; 
-  }
-  input::placeholder { 
-    color: rgba(94, 75, 75, 0.45); 
-    font-weight: 400; 
   }
 </style>
