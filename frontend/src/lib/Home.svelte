@@ -5,7 +5,7 @@
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { fade, scale, fly } from 'svelte/transition'; // Added 'fly'
+  import { fade, scale, fly } from 'svelte/transition';
 
   // UI state
   let bookTitle = "";
@@ -13,7 +13,8 @@
   let isFocused = false;
   let activeTab: "home" | "menu" = "home";
   let previousTab: "home" | "menu" = activeTab;
-  let typingPulseTimeout: number; // Added for the pulse timer
+  
+  let typingPulseTimeout: number | undefined;
 
   // Return animation state
   type ReturnStage = "idle" | "fading" | "bouncing_down" | "bouncing_up";
@@ -35,18 +36,6 @@
     summary: string;
     fullSummary?: string;
     coverUrl?: string | null;
-  };
-
-  type LibraryBook = {
-    id: string;
-    title: string;
-    author: string;
-    cover: string;
-    cover_color: string;
-    status: string;
-    pages_read: number;
-    total_pages: number;
-    date_added: string;
   };
 
   type BookStatus = "to-read" | "reading" | "finished";
@@ -84,11 +73,18 @@
   async function triggerBounceSequence() {
     isReturning = true;
     returnStage = "fading";
-    await wait(250);
+    // Stage 1: Fade out library content
+    await wait(250); 
+    
+    // Stage 2: Shrink Orb
     returnStage = "bouncing_down";
     await wait(700);
+    
+    // Stage 3: Bounce Up
     returnStage = "bouncing_up";
     await wait(600);
+    
+    // Stage 4: Reset to Search
     returnStage = "idle";
     isReturning = false;
   }
@@ -143,18 +139,13 @@
 
   $: shouldScale = (isFocused && activeTab === "home" && !isReturning) || isPulsing;
 
-  // UPDATED FUNCTION: Handles the pulsation logic
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
     
-    // Reset timer on each keystroke
     clearTimeout(typingPulseTimeout);
-    
-    // Activate pulse
     isPulsing = true;
     
-    // Deactivate pulse after 300ms of inactivity
-    typingPulseTimeout = setTimeout(() => {
+    typingPulseTimeout = window.setTimeout(() => {
       isPulsing = false;
     }, 100);
   }
@@ -318,23 +309,15 @@
 
     invoke('add_book', payload)
       .then((saved) => {
-        // SUCCESS
         console.log("Book saved:", saved);
-
-        // Trigger Orb Pulse
         isPulsing = true;
         setTimeout(() => { isPulsing = false; }, 600);
-
-        // Close Dialog
         showAddDialog = false;
         pendingBook = null;
         resetSearch();
       })
       .catch((err) => {
-        // ERROR (DUPLICATE)
         console.error("Save failed:", err);
-        
-        // Show the custom toast instead of alert
         triggerDuplicateToast();
       })
       .finally(() => {
@@ -342,12 +325,11 @@
       });
   }
   
-  // Helper to show duplicate toast
   function triggerDuplicateToast() {
       showDuplicateToast = true;
       setTimeout(() => {
           showDuplicateToast = false;
-      }, 3000); // Hide after 3 seconds
+      }, 3000);
   }
 
   async function handleDone() {
@@ -427,23 +409,29 @@
       {isAdding}
     >
       {#if activeTab === "home" && !isReturning}
-        <BookSearchModule
-          bind:bookTitle={bookTitle}
-          {searchState}
-          books={foundBooks}
-          {isAdding}
-          {isDiscarding}
-          on:input={handleInput}
-          on:keydown={handleKeydown}
-          on:focus={handleFocus}
-          on:blur={handleBlur}
-          on:add={handleAddRequest}
-          on:done={handleDone}
-          on:openSummary={handleOpenSummary}
-        />
+        <!-- WRAPPER: Centers the search module inside the Orb -->
+        <div class="search-container" in:fade={{ duration: 300, delay: 100 }} out:fade={{ duration: 200 }}>
+          <BookSearchModule
+            bind:bookTitle={bookTitle}
+            {searchState}
+            books={foundBooks}
+            {isAdding}
+            {isDiscarding}
+            on:input={handleInput}
+            on:keydown={handleKeydown}
+            on:focus={handleFocus}
+            on:blur={handleBlur}
+            on:add={handleAddRequest}
+            on:done={handleDone}
+            on:openSummary={handleOpenSummary}
+          />
+        </div>
       {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-        <div class="library-container" class:fade-out={returnStage === "fading"}>
-          <Library />
+        <!-- WRAPPER: Handles transition for the Library -->
+        <div class="library-wrapper" in:fade={{ duration: 400, delay: 450 }} out:fade={{ duration: 200 }}>
+           <div class="library-container" class:fade-out={returnStage === "fading"}>
+             <Library />
+           </div>
         </div>
       {/if}
     </Orb>
@@ -569,7 +557,6 @@
     </div>
   {/if}
 
-  <!-- NEW DUPLICATE TOAST NOTIFICATION -->
   {#if showDuplicateToast}
     <div 
         class="toast-overlay" 
@@ -588,7 +575,6 @@
 </main>
 
 <style>
-  /* ... (Previous Global/Layout Styles) ... */
   main {
     display: flex;
     height: 100vh;
@@ -603,6 +589,21 @@
     align-items: center;
     position: relative;
     z-index: 5;
+  }
+  
+  /* FIX: Ensure content inside the wrapper is centered */
+  .search-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+  }
+
+  .library-wrapper {
+      width: 100%;
+      height: 100%;
   }
 
   .library-container {
@@ -623,7 +624,7 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
-      pointer-events: none; /* Allows clicking through if needed */
+      pointer-events: none;
   }
 
   .toast-card {
@@ -675,7 +676,7 @@
       opacity: 0.8;
   }
 
-  /* ... (Summary, Add Dialog, Button styles kept exactly as before) ... */
+  /* ... (Summary & Add Dialog Styles) ... */
   .summary-overlay {
     position: fixed;
     inset: 0;
@@ -740,7 +741,6 @@
     min-width: 90px;
   }
 
-  /* Add-details popup */
   .add-overlay {
     position: fixed;
     inset: 0;
@@ -846,7 +846,6 @@
     transform: translateY(-1px);
   }
 
-  /* Pages input + custom arrows */
   .pages-row {
     display: flex;
     align-items: center;
@@ -855,7 +854,6 @@
     transition: opacity 0.2s ease, filter 0.2s ease;
   }
   
-  /* Disabled state styling */
   .pages-row.disabled-row {
     opacity: 0.5;
     filter: grayscale(0.5);
@@ -928,7 +926,6 @@
     margin-top: 6px;
   }
 
-  /* -- BUTTON STYLES -- */
   .pill-btn {
     min-width: 90px;
     padding: 8px 20px;
@@ -951,21 +948,18 @@
     color: #5b3b30;
   }
   
-  /* Save button: Ghost by default */
   .pill-primary {
     background: rgba(255, 255, 255, 0.5); 
     color: #4b332e;
     box-shadow: 0 4px 12px rgba(200, 120, 90, 0.15);
   }
 
-  /* Hover: Slight Opacity Boost */
   .pill-primary:hover {
     background: rgba(255, 255, 255, 0.75);
     transform: translateY(-1px);
     box-shadow: 0 8px 20px rgba(200, 120, 90, 0.2);
   }
 
-  /* Active/Click: Colorful Burst */
   .pill-primary:active {
     background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
     color: #2c1810;
