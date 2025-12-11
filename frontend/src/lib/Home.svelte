@@ -13,6 +13,7 @@
   let isFocused = false;
   let activeTab: "home" | "menu" = "home";
   let previousTab: "home" | "menu" = activeTab;
+  let typingPulseTimeout: number; // Added for the pulse timer
 
   // Return animation state
   type ReturnStage = "idle" | "fading" | "bouncing_down" | "bouncing_up";
@@ -142,8 +143,20 @@
 
   $: shouldScale = (isFocused && activeTab === "home" && !isReturning) || isPulsing;
 
+  // UPDATED FUNCTION: Handles the pulsation logic
   function handleInput(_event: CustomEvent<Event>) {
     if (activeTab !== "home") return;
+    
+    // Reset timer on each keystroke
+    clearTimeout(typingPulseTimeout);
+    
+    // Activate pulse
+    isPulsing = true;
+    
+    // Deactivate pulse after 300ms of inactivity
+    typingPulseTimeout = setTimeout(() => {
+      isPulsing = false;
+    }, 100);
   }
 
   function handleFocus(_event: CustomEvent<FocusEvent>) {

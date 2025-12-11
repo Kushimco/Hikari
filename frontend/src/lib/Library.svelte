@@ -10,12 +10,12 @@
     id: string;
     title: string;
     author: string;
-    cover: string;        // local file path or URL
+    cover: string;
     cover_color: string;
     status: string;
     date_added?: string;
-    total_pages: number;  
-    pages_read: number;   
+    total_pages: number;
+    pages_read: number;
   };
 
   // -- STATE --
@@ -26,6 +26,9 @@
   let selectedBook: Book | null = null;
   let showSortMenu = false;
   let showDeleteConfirm = false;
+
+  // Edit mode state for the progress number
+  let isEditingProgress = false;
 
   onMount(async () => {
     await loadBooks();
@@ -41,22 +44,20 @@
     }
   }
 
-  // Turn stored cover (local path or URL) into an <img src>
   function coverSrc(book: Book | null): string {
     if (!book || !book.cover) return "";
     if (book.cover.startsWith("http://") || book.cover.startsWith("https://")) {
       return book.cover;
     }
-    const src = convertFileSrc(book.cover);
-    return src;
+    return convertFileSrc(book.cover);
   }
 
-  // -- DERIVED STATE (Filter & Sort) --
+  // -- DERIVED STATE --
   $: filteredBooks = books.filter(book => {
     const matchesStatus =
       activeFilter === 'All'
         ? true
-        : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-'); 
+        : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-');
 
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
@@ -89,34 +90,30 @@
     showSortMenu = false;
   }
 
-  // --- OPEN BOOK (Logs Info) ---
   function openBook(book: Book) { 
-    console.log("OPENING BOOK - Current Info:", book);
+    console.log("OPENING BOOK:", book);
     selectedBook = book; 
+    isEditingProgress = false; // Reset edit mode on open
   }
 
-  // --- CLOSE BOOK (Saves Progress to Backend) ---
   async function closeBook() {
     if (selectedBook) {
       const finalBookState = selectedBook; 
-      console.log(`[CLOSE] Closing modal. Saving progress: ${finalBookState.pages_read} pages.`);
+      console.log(`[CLOSE] Saving progress: ${finalBookState.pages_read} pages.`);
 
       try {
-        // FIX: Change 'pages_read' (key) to 'pagesRead'
-        // Tauri expects camelCase keys for Rust arguments
+        // NOTE: 'pagesRead' must be camelCase for the Tauri command
         await invoke('update_book_progress', { 
           id: finalBookState.id, 
           pagesRead: finalBookState.pages_read 
         });
         
-        // Status is one word, so it stays the same
         await invoke('update_book_status', {
            id: finalBookState.id,
            status: finalBookState.status 
         });
         
         console.log("[CLOSE] Save successful.");
-
       } catch (err) {
         console.error("[CLOSE] Failed to save:", err);
       }
@@ -124,7 +121,9 @@
 
     selectedBook = null;
     showDeleteConfirm = false;
+    isEditingProgress = false;
   }
+
   // -- BOOK ACTIONS --
   async function updateStatus(newStatus: string) {
     if (!selectedBook) return;
@@ -143,19 +142,24 @@
     }
   }
 
-  // -- PROGRESS LOGIC (UI Only - No Backend Call) --
+  // -- PROGRESS LOGIC --
   function updateProgress(delta: number) {
     if (!selectedBook) return;
 
     let newPages = selectedBook.pages_read + delta;
     
-    // Boundary checks
     if (newPages < 0) newPages = 0;
     if (selectedBook.total_pages > 0 && newPages > selectedBook.total_pages) {
       newPages = selectedBook.total_pages;
     }
 
-    // Create updated object
+    applyProgressChange(newPages);
+  }
+
+  // Centralized function to apply changes and update status
+  function applyProgressChange(newPages: number) {
+    if (!selectedBook) return;
+
     const updatedBook = { ...selectedBook, pages_read: newPages };
 
     // Auto-update status
@@ -165,19 +169,49 @@
       updatedBook.status = "reading";
     }
 
-    // Update Svelte state only
     selectedBook = updatedBook;
     books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
   }
-  
-  function handleManualProgressInput(e: Event) {
-      const target = e.target as HTMLInputElement;
-      const val = parseInt(target.value);
-      if (isNaN(val)) return;
-      if (!selectedBook) return;
-      
-      const diff = val - selectedBook.pages_read;
-      if (diff !== 0) updateProgress(diff);
+
+  // -- EDIT MODE LOGIC --
+  function toggleEditProgress() {
+    isEditingProgress = true;
+  }
+
+  function finishEditing() {
+    isEditingProgress = false;
+  }
+
+  // Action to auto-focus the input when it appears
+  function focusInput(node: HTMLElement) {
+    node.focus();
+  }
+
+  // Blocks negative signs and 'e'
+  function blockInvalidChars(e: KeyboardEvent) {
+    if (e.key === '-' || e.key === 'e' || e.key === '+') {
+      e.preventDefault();
+    }
+    if (e.key === 'Enter') {
+      finishEditing();
+    }
+  }
+
+  // Handles typing numbers directly
+  function handleInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    let val = parseInt(target.value);
+
+    if (isNaN(val)) val = 0;
+    if (val < 0) val = 0; // Double safety
+
+    // Cap at max pages
+    if (selectedBook && selectedBook.total_pages > 0 && val > selectedBook.total_pages) {
+      val = selectedBook.total_pages;
+      target.value = val.toString(); // Update input visual to reflect cap
+    }
+
+    applyProgressChange(val);
   }
 
   function confirmDelete() { showDeleteConfirm = true; }
@@ -195,7 +229,6 @@
     }
   }
 
-  // Helper for progress calculation
   function getProgressPercent(book: Book): number {
     if (!book.total_pages || book.total_pages === 0) return 0;
     return Math.min(100, Math.max(0, (book.pages_read / book.total_pages) * 100));
@@ -297,7 +330,6 @@
             />
           {/if}
           
-          <!-- PROGRESS BAR ON COVER -->
           {#if book.total_pages > 0}
             <div class="mini-progress-bar">
                 <div class="mini-progress-fill" style="width: {getProgressPercent(book)}%"></div>
@@ -363,7 +395,24 @@
           <div class="progress-section">
              <div class="progress-info">
                  <span class="progress-label">Progress</span>
-                 <span class="progress-text">{selectedBook.pages_read} / {selectedBook.total_pages} pages</span>
+                 <div class="progress-edit-wrapper">
+                    {#if isEditingProgress}
+                      <input 
+                        type="number" 
+                        class="progress-input"
+                        value={selectedBook.pages_read}
+                        use:focusInput
+                        on:input={handleInput}
+                        on:keydown={blockInvalidChars}
+                        on:blur={finishEditing}
+                      />
+                    {:else}
+                      <button class="progress-text clickable" on:click={toggleEditProgress} title="Click to edit">
+                        {selectedBook.pages_read}
+                      </button>
+                    {/if}
+                    <span class="progress-total"> / {selectedBook.total_pages} pages</span>
+                 </div>
              </div>
              
              <!-- Visual Bar -->
@@ -373,6 +422,7 @@
 
              <!-- Controls -->
              <div class="progress-controls">
+                 <button class="prog-btn" on:click={() => updateProgress(-10)}>-10</button>
                  <button class="prog-btn" on:click={() => updateProgress(-1)}>-</button>
                  <button class="prog-btn" on:click={() => updateProgress(1)}>+</button>
                  <button class="prog-btn" on:click={() => updateProgress(10)}>+10</button>
@@ -434,16 +484,16 @@
 {/if}
 
 <style>
+  /* Base Layout */
   .library-content { transition: filter 0.3s ease; height: 100%; width: 100%; padding-bottom: 40px; animation: fadeIn 0.6s ease 0.6s forwards; opacity: 0; }
   .library-content.blurred { filter: blur(8px); pointer-events: none; }
 
   .lib-header { display: flex; flex-direction: column; gap: 16px; margin-bottom: 25px; align-items: flex-start; }
   .title-group { display: flex; justify-content: space-between; width: 100%; align-items: center; }
   h2 { margin: 0; font-family: 'Playfair Display', serif; font-size: 2.5rem; font-weight: 600; color: #4a3b3b; }
-
   .header-controls { display: flex; gap: 12px; align-items: center; }
 
-  /* Search & Sort styles */
+  /* Search & Sort */
   .search-wrapper { position: relative; display: flex; align-items: center; }
   .search-icon { position: absolute; left: 12px; color: rgba(94, 75, 75, 0.4); pointer-events: none; }
   .search-wrapper input {
@@ -543,7 +593,6 @@
   .status-dot.finished { background: #529ffd; }
   .status-dot.to-read { background: #ff4eaf; }
   
-  /* MINI PROGRESS BAR ON COVER */
   .mini-progress-bar {
       position: absolute;
       bottom: 0;
@@ -580,11 +629,46 @@
   .modal-header h3 { font-family: 'Playfair Display', serif; font-size: 2rem; margin: 0 0 8px 0; color: #2c1810; line-height: 1.1; }
   .modal-author { font-size: 0.9rem; color: rgba(94, 75, 75, 0.7); text-transform: uppercase; margin: 0; }
   
-  /* PROGRESS SECTION IN MODAL */
+  /* PROGRESS SECTION */
   .progress-section { margin-top: 20px; }
-  .progress-info { display: flex; justify-content: space-between; font-size: 0.8rem; color: #5e4b4b; margin-bottom: 6px; }
+  .progress-info { display: flex; justify-content: space-between; font-size: 0.8rem; color: #5e4b4b; margin-bottom: 6px; align-items: center; }
   .progress-label { text-transform: uppercase; font-weight: 600; opacity: 0.6; }
-  .progress-text { font-weight: 600; }
+  
+  .progress-edit-wrapper { display: flex; align-items: baseline; gap: 4px; font-weight: 600; }
+  .progress-text.clickable { 
+      background: none; 
+      border: none; 
+      padding: 0; 
+      font-size: 0.8rem; 
+      font-weight: 700; 
+      color: #5e4b4b; 
+      cursor: pointer; 
+      border-bottom: 1px dashed rgba(94,75,75,0.4); 
+      transition: color 0.2s;
+  }
+  .progress-text.clickable:hover { color: #2c1810; border-bottom-color: #2c1810; }
+  
+  .progress-input {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid #5e4b4b;
+      width: 40px;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #2c1810;
+      text-align: right;
+      padding: 0;
+      outline: none;
+      -moz-appearance: textfield; /* Firefox: remove spinner */
+      appearance: textfield;
+  }
+  /* Remove spinners in Chrome/Safari/Edge */
+  .progress-input::-webkit-outer-spin-button,
+  .progress-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+  }
   
   .modal-progress-track {
       height: 8px;
