@@ -26,6 +26,20 @@
 
   $: isProgressDisabled = book.total_pages === 0;
 
+  // --- NEW: DYNAMIC FONT SIZING LOGIC ---
+  function titleSize(title: string): string {
+    const len = title.length;
+    if (len > 60) return "1.15rem";  // Very long titles
+    if (len > 35) return "1.4rem";   // Medium long titles
+    return "2rem";                   // Standard short titles
+  }
+
+  function authorSize(author: string): string {
+    const len = author.length;
+    if (len > 40) return "0.75rem";
+    return "0.9rem";
+  }
+
   function coverSrc(cover: string): string {
     if (!cover) return "";
     if (cover.startsWith("http://") || cover.startsWith("https://")) {
@@ -156,8 +170,9 @@
     <!-- RIGHT SIDE: CONTENT -->
     <div class="modal-content">
       <div class="modal-header">
-        <h3>{book.title}</h3>
-        <p class="modal-author">{book.author}</p>
+        <!-- DYNAMIC FONT SIZING APPLIED HERE -->
+        <h3 style="font-size: {titleSize(book.title)}">{book.title}</h3>
+        <p class="modal-author" style="font-size: {authorSize(book.author)}">{book.author}</p>
         
         <!-- PROGRESS CONTROL -->
         <div class="progress-section">
@@ -280,7 +295,23 @@
 
   /* Content Side */
   .modal-content { flex: 1; padding: 32px; display: flex; flex-direction: column; justify-content: space-between; }
-  .modal-header h3 { font-family: 'Playfair Display', serif; font-size: 2rem; margin: 0 0 8px 0; color: #2c1810; line-height: 1.1; }
+  
+  .modal-header h3 { 
+    font-family: 'Playfair Display', serif; 
+    /* Font size handled inline dynamically, fallback here just in case */
+    font-size: 2rem; 
+    margin: 0 0 8px 0; 
+    color: #2c1810; 
+    line-height: 1.1; 
+    
+    /* ADDED: Safety clamp to ensure it never pushes content off even if calculation fails */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
   .modal-author { font-size: 0.9rem; color: rgba(94, 75, 75, 0.7); text-transform: uppercase; margin: 0; }
   
   /* PROGRESS SECTION */
