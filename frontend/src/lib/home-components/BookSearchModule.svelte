@@ -258,6 +258,7 @@
   </div>
 {/if}
 
+
 <style>
   .api-selector {
     display: flex;
@@ -274,7 +275,8 @@
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 20px;
     padding: 8px 16px;
-    color: rgba(255, 255, 255, 0.7);
+    /* CHANGED: Matches the #5b3b30 color of the 'Done/Add' buttons */
+    color: #5b3b30;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
@@ -290,7 +292,8 @@
 
   .api-bubble.active {
     background: rgba(255, 255, 255, 0.4);
-    color: rgba(255, 255, 255, 0.9);
+    /* CHANGED: Ensure active state keeps the dark brown color */
+    color: #5b3b30;
     border-color: rgba(255, 255, 255, 0.5);
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
   }
