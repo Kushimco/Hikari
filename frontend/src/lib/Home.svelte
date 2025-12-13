@@ -193,7 +193,7 @@
     if (!orbElement) return;
     const el = orbElement;
     
-    // FIX: Use transform instead of margin-top for smoother animation
+    // Smooth glide logic
     const computedStyle = window.getComputedStyle(el);
     const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
 
@@ -203,13 +203,12 @@
 
     requestAnimationFrame(() => {
       el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
-      el.style.transform = "translateY(0)"; // Glide to absolute center
+      el.style.transform = "translateY(0)";
     });
   }
 
   function restoreOrbFloat() {
     if (!orbElement) return;
-    // Clear inline styles to restore CSS keyframe animation
     orbElement.style.transition = ""; 
     orbElement.style.transform = "";
     orbElement.style.animation = "";
@@ -293,6 +292,7 @@
 
   <section class="orb-stage">
     
+    <!-- MAIN ORB: Shrinks when going to Settings -->
     {#if activeTab !== "settings"}
       <div 
         class="orb-wrapper"
@@ -345,8 +345,14 @@
     {/if}
 
     <!-- SETTINGS VIEW -->
+    <!-- FIX: Removed delay so bubbles start flying out AS the orb shrinks.
+         This creates the "dividing" effect. -->
     {#if activeTab === "settings"}
-      <div class="settings-layer">
+      <div 
+        class="settings-layer"
+        in:fade={{ duration: 0, delay: 0 }} 
+        out:fade={{ duration: 200 }}
+      >
         <Settings />
       </div>
     {/if}

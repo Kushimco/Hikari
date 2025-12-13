@@ -1,9 +1,7 @@
 <script lang="ts">
   import { fly, scale } from 'svelte/transition';
   import { elasticOut } from 'svelte/easing';
-  // import { invoke } from '@tauri-apps/api/core'; // Uncomment when connecting to backend
-  export let isReturning = false;
-  export let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
+
   // --- SETTINGS DATA ---
   const settingsOptions = [
     { id: 'export', label: 'Backup', icon: '📥', color: 'rgba(213, 232, 196, 0.4)' },
@@ -23,15 +21,15 @@
 
   function handleClick(id: string) {
     console.log("Clicked setting:", id);
-    // invoke('your_command_here', { ... });
+    // invoke('command', { ... });
   }
 </script>
 
 <div class="settings-container">
-  <!-- Center Label/Hub -->
+  <!-- Center Label/Hub: Scales up from 0 to fill the void left by the main Orb -->
   <div 
     class="center-hub"
-    in:scale={{ duration: 600, easing: elasticOut, start: 0 }}
+    in:scale={{ duration: 500, easing: elasticOut, start: 0, delay: 100 }}
     out:scale={{ duration: 300, start: 0 }}
   >
     <span>Settings</span>
@@ -43,22 +41,20 @@
     
     <button
       class="bubble"
-      class:flying-back={isReturning && returnStage === "bouncing_down"}
-      class:hidden={isReturning && returnStage === "bouncing_up"}
       style="
         --x: {pos.x}px; 
         --y: {pos.y}px; 
         --color: {item.color};
-        --delay: {i * 0.1}s;
       "
       in:fly={{ 
-        x: 0, 
-        y: 0, 
-        duration: 800, 
-        delay: i * 50, 
+        /* CRITICAL FIX: Start from the negative of the final position = Center (0,0) */
+        x: -pos.x, 
+        y: -pos.y, 
+        duration: 900, 
+        delay: 0, /* Start immediately */
         easing: elasticOut 
       }}
-      out:scale={{ duration: 250, delay: (settingsOptions.length - i) * 50 }}
+      out:scale={{ duration: 250, delay: 0 }}
       on:click={() => handleClick(item.id)}
       aria-label={item.label}
     >
@@ -115,9 +111,10 @@
     justify-content: center;
     align-items: center;
     cursor: pointer;
+    
+    /* Final Position set by CSS */
     transform: translate(var(--x), var(--y));
-    animation: float 6s ease-in-out infinite;
-    animation-delay: var(--delay);
+    
     transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s ease, border-color 0.2s ease;
     box-shadow: 
       0 10px 30px rgba(0, 0, 0, 0.1),
@@ -157,20 +154,5 @@
     color: #4b332e;
     text-transform: uppercase;
     opacity: 0.8;
-  }
-
-  .bubble.flying-back {
-    transform: translate(-50%, -50%) !important;
-    transition: transform 0.5s ease;
-  }
-
-  .bubble.hidden {
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-
-  @keyframes float {
-    0%, 100% { margin-top: 0px; }
-    50% { margin-top: -15px; } 
   }
 </style>
