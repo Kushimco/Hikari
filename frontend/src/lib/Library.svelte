@@ -27,7 +27,7 @@
   }
 
   // -- DERIVED STATE --
-  $: filteredBooks = books.filter(book => {
+  $: filteredBooks = books.filter((book: Book) => {
     const matchesStatus = activeFilter === 'All' ? true : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-');
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch = q === "" ? true : book.title.toLowerCase().includes(q) || book.author.toLowerCase().includes(q);

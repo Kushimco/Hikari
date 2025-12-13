@@ -16,7 +16,7 @@
   // State
   // FIX: Type includes "settings" now
   let activeTab: "home" | "menu" | "settings" = "home";
-  let previousTab: "home" | "menu" | "settings" = activeTab;
+  //let previousTab: "home" | "menu" | "settings" = activeTab;
 
   let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
   let isReturning = false;
@@ -28,6 +28,13 @@
   let isPulsing = false;
   let isFocused = false;
   let typingPulseTimeout: number | undefined;
+  let selectedApi: "openlibrary" | "anilist" = "openlibrary";
+  let lastQuery = "";
+  let isApiSwitching = false;
+  let apiResults: { [key in "openlibrary" | "anilist"]: any[] | null } = {
+    openlibrary: null,
+    anilist: null
+  };
 
   // Modal States
   let showAddDialog = false;
@@ -36,29 +43,194 @@
   let summaryBook: any | null = null;
   let orbElement: HTMLDivElement | null = null;
 
-  // --- LOGIC ---
+  // Computed properties
+  let isGlowing = false;
+  $: isGlowing = (isReturning && returnStage !== "idle") || isFocused || searchState !== "idle" || showAddDialog || isPulsing;
+  $: showLibrary = activeTab === "menu" || isReturning;
 
-  $: if (activeTab !== previousTab) {
-    // Only bounce when returning to Home from Menu or Settings
-    if ((previousTab === "menu" || previousTab === "settings") && activeTab === "home") {
-      triggerBounceSequence();
+  async function searchOpenLibrary(query: string): Promise<any[]> {
+    try {
+      const res = await fetch(
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
+      );
+
+      if (!res.ok) return [];
+
+      const data: any = await res.json();
+      const docs: any[] = data.docs ?? [];
+
+      if (!docs.length) return [];
+
+      const books = docs.map(doc => {
+        let coverUrl: string | null = null;
+        if (doc.cover_i) coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
+        else if (doc.isbn?.[0]) coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg`;
+
+        return {
+          title: doc.title ?? query,
+          author: doc.author_name?.[0] ?? "Unknown author",
+          year: doc.first_publish_year?.toString() ?? "—",
+          pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
+          summary: "Loading description...",
+          fullSummary: null,
+          coverUrl,
+          key: doc.key
+        };
+      });
+
+      // Preload cover images
+      books.forEach((book: any) => {
+        if (book.coverUrl) {
+          const img = new Image();
+          img.src = book.coverUrl;
+        }
+      });
+
+      // Fetch descriptions
+      await Promise.all(books.map(async (book: any) => {
+        if (book.key) {
+          try {
+            const descRes = await fetch(`https://openlibrary.org${book.key}.json`);
+            if (descRes.ok) {
+              const descData = await descRes.json();
+              const description = descData.description;
+              if (typeof description === 'string') {
+                book.summary = description.length > 200 ? description.substring(0, 200) + "..." : description;
+                book.fullSummary = description;
+              } else if (description?.value) {
+                const desc = description.value;
+                book.summary = desc.length > 200 ? desc.substring(0, 200) + "..." : desc;
+                book.fullSummary = desc;
+              } else {
+                book.summary = "No description available.";
+              }
+            } else {
+              book.summary = "No description available.";
+            }
+          } catch (err) {
+            console.error("Error fetching description for", book.title, err);
+            book.summary = "No description available.";
+          }
+        } else {
+          book.summary = "No description available.";
+        }
+      }));
+
+      return books;
+    } catch (err) {
+      console.error("Open Library search failed:", err);
+      return [];
     }
-    previousTab = activeTab;
   }
 
-  async function triggerBounceSequence() {
-    isReturning = true;
-    returnStage = "fading";
-    await wait(250);
-    returnStage = "bouncing_down";
-    await wait(700);
-    returnStage = "bouncing_up";
-    await wait(600);
-    returnStage = "idle";
-    isReturning = false;
+  async function searchAnilist(query: string): Promise<any[]> {
+    try {
+      const anilistQuery = `
+        query ($search: String) {
+          Page(perPage: 10) {
+            media(search: $search, type: MANGA, sort: POPULARITY_DESC) {
+              id
+              title {
+                romaji
+                english
+              }
+              coverImage {
+                large
+              }
+              description
+              chapters
+              volumes
+              startDate {
+                year
+              }
+              staff(perPage: 1, sort: RELEVANCE) {
+                edges {
+                  node {
+                    name {
+                      full
+                    }
+                  }
+                  role
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const anilistRes = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          query: anilistQuery,
+          variables: { search: query }
+        })
+      });
+
+      if (!anilistRes.ok) return [];
+
+      const anilistData = await anilistRes.json();
+      const media = anilistData.data?.Page?.media ?? [];
+
+      if (!media.length) return [];
+
+      const books = media.map((manga: any) => ({
+        title: manga.title.english || manga.title.romaji || query,
+        author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
+        year: manga.startDate?.year?.toString() ?? "—",
+        pages: (manga.chapters || 0).toString(),
+        summary: manga.description ? (manga.description.length > 200 ? manga.description.substring(0, 200) + "..." : manga.description) : "No description available.",
+        fullSummary: manga.description,
+        coverUrl: manga.coverImage?.large,
+        key: null
+      }));
+
+      // Preload cover images
+      books.forEach((book: any) => {
+        if (book.coverUrl) {
+          const img = new Image();
+          img.src = book.coverUrl;
+        }
+      });
+
+      return books;
+    } catch (err) {
+      console.error("AniList search failed:", err);
+      return [];
+    }
   }
   
-  function wait(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+  async function handleApiSwitch(api: "openlibrary" | "anilist") {
+    if (selectedApi === api || !lastQuery) return;
+    selectedApi = api;
+    
+    // Switch to stored results for this API
+    const results = apiResults[api];
+    if (results) {
+      foundBooks = results;
+    } else {
+      // If we don't have results for this API yet, search it
+      isApiSwitching = true;
+      try {
+        let searchResults: any[] = [];
+        if (api === "openlibrary") {
+          searchResults = await searchOpenLibrary(lastQuery);
+        } else {
+          searchResults = await searchAnilist(lastQuery);
+        }
+        apiResults[api] = searchResults;
+        foundBooks = searchResults;
+      } catch (err) {
+        console.error(`Error searching ${api}:`, err);
+        foundBooks = [];
+      } finally {
+        isApiSwitching = false;
+      }
+    }
+  }
 
   // --- ORB ANIMATION LOGIC ---
   function handleFocus() {
@@ -106,69 +278,35 @@
 
     const query = bookTitle.trim();
     bookTitle = "";
+    lastQuery = query;
     searchState = "loading";
+    apiResults = { openlibrary: null, anilist: null };
 
     try {
-      const res = await fetch(
-        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
-      );
+      // Search both APIs in parallel
+      const [openLibraryResults, anilistResults] = await Promise.all([
+        searchOpenLibrary(query),
+        searchAnilist(query)
+      ]);
 
-      if (!res.ok) throw new Error(`Open Library error: ${res.status}`);
+      apiResults.openlibrary = openLibraryResults;
+      apiResults.anilist = anilistResults;
 
-      const data: any = await res.json();
-      const docs: any[] = data.docs ?? [];
-
-      if (!docs.length) {
-        searchState = "idle";
-        return;
+      // Show results from the currently selected API, or switch to the one that has results
+      if (selectedApi === "openlibrary" && openLibraryResults.length > 0) {
+        foundBooks = openLibraryResults;
+      } else if (selectedApi === "anilist" && anilistResults.length > 0) {
+        foundBooks = anilistResults;
+      } else if (openLibraryResults.length > 0) {
+        selectedApi = "openlibrary";
+        foundBooks = openLibraryResults;
+      } else if (anilistResults.length > 0) {
+        selectedApi = "anilist";
+        foundBooks = anilistResults;
+      } else {
+        // Both APIs found nothing
+        foundBooks = [];
       }
-
-      foundBooks = docs.map(doc => {
-        let coverUrl: string | null = null;
-        if (doc.cover_i) coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
-        else if (doc.isbn?.[0]) coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg`;
-
-        return {
-          title: doc.title ?? query,
-          author: doc.author_name?.[0] ?? "Unknown author",
-          year: doc.first_publish_year?.toString() ?? "—",
-          pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
-          summary: "Loading description...",
-          fullSummary: null,
-          coverUrl,
-          key: doc.key
-        };
-      });
-
-      // Fetch descriptions for each book
-      await Promise.all(foundBooks.map(async (book) => {
-        if (book.key) {
-          try {
-            const descRes = await fetch(`https://openlibrary.org${book.key}.json`);
-            if (descRes.ok) {
-              const descData = await descRes.json();
-              const description = descData.description;
-              if (typeof description === 'string') {
-                book.summary = description.length > 200 ? description.substring(0, 200) + "..." : description;
-                book.fullSummary = description;
-              } else if (description?.value) {
-                const desc = description.value;
-                book.summary = desc.length > 200 ? desc.substring(0, 200) + "..." : desc;
-                book.fullSummary = desc;
-              } else {
-                book.summary = "No description available.";
-              }
-            } else {
-              book.summary = "No description available.";
-            }
-          } catch (err) {
-            console.error("Error fetching description for", book.title, err);
-            book.summary = "No description available.";
-          }
-        } else {
-          book.summary = "No description available.";
-        }
-      }));
 
       searchState = "result";
     } catch (err) {
@@ -190,8 +328,12 @@
     setTimeout(() => isPulsing = false, 600);
     showAddDialog = false;
     pendingBook = null;
+    
+    // Reset search state after adding a book
     searchState = "idle";
     foundBooks = [];
+    apiResults = { openlibrary: null, anilist: null };
+    lastQuery = "";
     
     try {
       await invoke('add_book', {
@@ -210,8 +352,6 @@
       // Optionally, could revert UI changes here if needed
     }
   }
-
-  $: isGlowing = (isReturning && returnStage !== "idle") || isFocused || searchState !== "idle" || showAddDialog || isPulsing;
 </script>
 
 <main>
@@ -232,19 +372,27 @@
             bind:bookTitle={bookTitle}
             {searchState}
             books={foundBooks}
+            {selectedApi}
+            {isApiSwitching}
             on:input={handleInput}
             on:keydown={handleKeydown}
             on:focus={handleFocus}
             on:blur={handleBlur}
             on:add={handleAddRequest}
             on:openSummary={(e) => summaryBook = e.detail}
-            on:done={() => { searchState = "idle"; foundBooks = []; }}
+            on:done={() => { 
+              searchState = "idle";
+              foundBooks = [];
+              apiResults = { openlibrary: null, anilist: null };
+              lastQuery = "";
+            }}
+            on:apiSwitch={(e) => handleApiSwitch(e.detail)}
           />
         </div>
 
-      {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
+      {:else if showLibrary}
         <div class="library-wrapper" in:fade={{ duration: 400, delay: 1000 }} out:fade={{ duration: 200 }}>
-          <div class="library-container" class:fade-out={returnStage === "fading"}>
+          <div class="library-container" class:fade-out={isReturning}>
             <Library />
           </div>
         </div>
