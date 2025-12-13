@@ -28,8 +28,10 @@
     pagesReadInput = totalPagesInput;
   }
 
+  $: isPagesDisabled = statusInput === "finished" || totalPagesInput === "0";
+
   function increment() {
-    if (statusInput === "finished") return;
+    if (isPagesDisabled) return;
     const current = parseInt(pagesReadInput || "0");
     const total = parseInt(totalPagesInput || "0");
     
@@ -42,17 +44,18 @@
   }
 
   function decrement() {
-    if (statusInput === "finished") return;
+    if (isPagesDisabled) return;
     const current = parseInt(pagesReadInput || "0");
     pagesReadInput = String(Math.max(0, current - 1));
   }
   
   function handlePageInput() {
-      const current = parseInt(pagesReadInput);
-      const total = parseInt(totalPagesInput);
-      if (!isNaN(total) && total > 0 && current > total) {
-          pagesReadInput = String(total);
-      }
+    if (isPagesDisabled) return;
+    const current = parseInt(pagesReadInput);
+    const total = parseInt(totalPagesInput);
+    if (!isNaN(total) && total > 0 && current > total) {
+        pagesReadInput = String(total);
+    }
   }
 
   function handleSave() {
@@ -107,13 +110,13 @@
 
       <!-- PAGE COUNTER -->
       <label class="field field-center">
-        <span>Pages read / {totalPagesInput}</span>
-        <div class="pages-row" class:disabled-row={statusInput === "finished"}>
+        <span>Pages read{#if totalPagesInput !== "0"} / {totalPagesInput}{/if}</span>
+        <div class="pages-row" class:disabled-row={isPagesDisabled}>
           <button
             type="button"
             class="pages-arrow pages-arrow-left"
             on:click={decrement}
-            disabled={statusInput === "finished"}
+            disabled={isPagesDisabled}
             aria-label="Decrease pages read"
           >
             –
@@ -123,14 +126,14 @@
             min="0"
             bind:value={pagesReadInput}
             on:input={handlePageInput}
-            disabled={statusInput === "finished"}
+            disabled={isPagesDisabled}
             class="pages-input no-spin"
           />
           <button
             type="button"
             class="pages-arrow pages-arrow-right"
             on:click={increment}
-            disabled={statusInput === "finished"}
+            disabled={isPagesDisabled}
             aria-label="Increase pages read"
           >
             +

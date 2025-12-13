@@ -1,7 +1,7 @@
 <script lang="ts">
   // Svelte 4 style; if you're on Svelte 5 you can switch to $props()
   export let orbElement: HTMLDivElement | null = null;
-  export let activeTab: "home" | "menu";
+  export let activeTab: "home" | "menu" | "settings";
   export let isReturning: boolean;
   export let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up";
   export let isGlowing: boolean;

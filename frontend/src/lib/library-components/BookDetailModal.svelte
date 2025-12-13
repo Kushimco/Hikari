@@ -24,6 +24,8 @@
   let isEditingProgress = false;
   let showDeleteConfirm = false;
 
+  $: isProgressDisabled = book.total_pages === 0;
+
   function coverSrc(cover: string): string {
     if (!cover) return "";
     if (cover.startsWith("http://") || cover.startsWith("https://")) {
@@ -50,6 +52,7 @@
   }
 
   function updateProgress(delta: number) {
+    if (isProgressDisabled) return;
     let newPages = book.pages_read + delta;
     
     if (newPages < 0) newPages = 0;
@@ -69,6 +72,7 @@
   }
 
   function handleInput(e: Event) {
+    if (isProgressDisabled) return;
     const target = e.target as HTMLInputElement;
     let val = parseInt(target.value);
 
@@ -92,7 +96,9 @@
     emitUpdate({ pages_read: val, status: newStatus });
   }
 
-  function toggleEditProgress() { isEditingProgress = true; }
+  function toggleEditProgress() { 
+    if (!isProgressDisabled) isEditingProgress = true; 
+  }
   function finishEditing() { isEditingProgress = false; }
 
   function focusInput(node: HTMLElement) { node.focus(); }
@@ -170,6 +176,7 @@
                      on:input={handleInput}
                      on:keydown={blockInvalidChars}
                      on:blur={finishEditing}
+                     disabled={isProgressDisabled}
                    />
                    <span class="progress-total"> / {book.total_pages} pages</span>
                  </div>
@@ -178,6 +185,7 @@
                  <button 
                    class="progress-edit-wrapper" 
                    on:click={toggleEditProgress}
+                   disabled={isProgressDisabled}
                    aria-label="Change pages read"
                  >
                    <span class="progress-text clickable" title="Click to edit">
@@ -195,10 +203,10 @@
 
            <!-- Controls -->
            <div class="progress-controls">
-               <button class="prog-btn" on:click={() => updateProgress(-10)}>-10</button>
-               <button class="prog-btn" on:click={() => updateProgress(-1)}>-</button>
-               <button class="prog-btn" on:click={() => updateProgress(1)}>+</button>
-               <button class="prog-btn" on:click={() => updateProgress(10)}>+10</button>
+               <button class="prog-btn" on:click={() => updateProgress(-10)} disabled={isProgressDisabled}>-10</button>
+               <button class="prog-btn" on:click={() => updateProgress(-1)} disabled={isProgressDisabled}>-</button>
+               <button class="prog-btn" on:click={() => updateProgress(1)} disabled={isProgressDisabled}>+</button>
+               <button class="prog-btn" on:click={() => updateProgress(10)} disabled={isProgressDisabled}>+10</button>
            </div>
         </div>
       </div>
