@@ -18,10 +18,21 @@
   let activeTab: "home" | "menu" | "settings" = "home";
   let previousTab: "home" | "menu" | "settings" = activeTab;
 
+  // --- SETTINGS ANIMATION STATE ---
+  // "idle": Normal
+  // "collapsing": home orb outro (shrinks)
+  // "glowing": seed visible + glowing (Settings)
+  // "dividing": seed spawns bubbles (Settings)
+  let settingsStage: "idle" | "collapsing" | "glowing" | "dividing" = "idle";
+
+  // Tracks whether we are currently performing the Home/Menu -> Settings transition
+  let isOpeningSettings = false;
+
+  // Return animation
   let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
   let isReturning = false;
 
-  // Search State
+  // Search & Data State
   let bookTitle = "";
   let searchState: "idle" | "loading" | "result" = "idle";
   let foundBooks: any[] = [];
@@ -43,14 +54,40 @@
   let summaryBook: any | null = null;
   let orbElement: HTMLDivElement | null = null;
 
-  // Computed properties
-  $: isGlowing = (isReturning && returnStage !== "idle") || isFocused || searchState !== "idle" || showAddDialog || isPulsing;
-  
-  // --- ANIMATION TRIGGER LOGIC ---
+  // IMPORTANT: keep glow during collapsing (so the tiny orb still has aura)
+  $: isGlowing =
+    (isReturning && returnStage !== "idle") ||
+    isFocused ||
+    searchState !== "idle" ||
+    showAddDialog ||
+    isPulsing ||
+    settingsStage === "collapsing";
+
+  function wait(ms: number) {
+    return new Promise<void>((r) => setTimeout(r, ms));
+  }
+
+  // --- TAB SWITCH LOGIC ---
   $: if (activeTab !== previousTab) {
     if (activeTab === "home") {
       triggerBounceSequence();
     }
+
+    // Going TO settings: start collapsing immediately
+    if (activeTab === "settings" && previousTab !== "settings") {
+      // prevent any “settle to center” inline transform from fighting the scale outro
+      restoreOrbFloat();
+
+      isOpeningSettings = true;
+      settingsStage = "collapsing";
+    }
+
+    // Leaving settings: reset
+    if (previousTab === "settings" && activeTab !== "settings") {
+      isOpeningSettings = false;
+      settingsStage = "idle";
+    }
+
     previousTab = activeTab;
   }
 
@@ -65,8 +102,20 @@
     returnStage = "idle";
     isReturning = false;
   }
-  
-  function wait(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+  // Called exactly when the big orb OUT transition completes (seamless chaining)
+  async function handleOrbOutroEnd() {
+    if (!isOpeningSettings) return;
+
+    settingsStage = "glowing";
+    await wait(240);
+
+    if (activeTab === "settings") {
+      settingsStage = "dividing";
+    }
+
+    isOpeningSettings = false;
+  }
 
   // --- API FUNCTIONS ---
   async function searchOpenLibrary(query: string): Promise<any[]> {
@@ -96,13 +145,13 @@
         };
       });
 
-      // Preload covers
       books.forEach((book: any) => {
         if (book.coverUrl) {
           const img = new Image();
           img.src = book.coverUrl;
         }
       });
+
       return books;
     } catch (err) {
       console.error("Open Library search failed:", err);
@@ -129,21 +178,26 @@
           }
         }
       `;
+
       const anilistRes = await fetch('https://graphql.anilist.co', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ query: anilistQuery, variables: { search: query } })
       });
+
       if (!anilistRes.ok) return [];
+
       const anilistData = await anilistRes.json();
       const media = anilistData.data?.Page?.media ?? [];
-      
+
       return media.map((manga: any) => ({
         title: manga.title.english || manga.title.romaji || query,
         author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
         year: manga.startDate?.year?.toString() ?? "—",
         pages: (manga.chapters || 0).toString(),
-        summary: manga.description ? (manga.description.length > 200 ? manga.description.substring(0, 200) + "..." : manga.description) : "No description available.",
+        summary: manga.description
+          ? (manga.description.length > 200 ? manga.description.substring(0, 200) + "..." : manga.description)
+          : "No description available.",
         fullSummary: manga.description,
         coverUrl: manga.coverImage?.large,
         key: null
@@ -153,30 +207,33 @@
       return [];
     }
   }
-  
+
   async function handleApiSwitch(api: "openlibrary" | "anilist") {
     if (selectedApi === api || !lastQuery) return;
     selectedApi = api;
+
     const results = apiResults[api];
     if (results) {
       foundBooks = results;
-    } else {
-      isApiSwitching = true;
-      try {
-        let searchResults: any[] = [];
-        if (api === "openlibrary") searchResults = await searchOpenLibrary(lastQuery);
-        else searchResults = await searchAnilist(lastQuery);
-        apiResults[api] = searchResults;
-        foundBooks = searchResults;
-      } catch (err) {
-        foundBooks = [];
-      } finally {
-        isApiSwitching = false;
-      }
+      return;
+    }
+
+    isApiSwitching = true;
+    try {
+      let searchResults: any[] = [];
+      if (api === "openlibrary") searchResults = await searchOpenLibrary(lastQuery);
+      else searchResults = await searchAnilist(lastQuery);
+
+      apiResults[api] = searchResults;
+      foundBooks = searchResults;
+    } catch {
+      foundBooks = [];
+    } finally {
+      isApiSwitching = false;
     }
   }
 
-  // --- ORB INTERACTION ---
+  // --- ORB HANDLERS ---
   function handleFocus() {
     if (activeTab === "home") {
       isFocused = true;
@@ -192,14 +249,13 @@
   function settleOrbToCenter() {
     if (!orbElement) return;
     const el = orbElement;
-    
-    // Smooth glide logic
+
     const computedStyle = window.getComputedStyle(el);
     const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
 
     el.style.animation = "none";
     el.style.transform = currentTransform;
-    el.offsetHeight; // Force reflow
+    el.offsetHeight;
 
     requestAnimationFrame(() => {
       el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
@@ -209,7 +265,7 @@
 
   function restoreOrbFloat() {
     if (!orbElement) return;
-    orbElement.style.transition = ""; 
+    orbElement.style.transition = "";
     orbElement.style.transform = "";
     orbElement.style.animation = "";
   }
@@ -218,7 +274,7 @@
     if (activeTab === "home") {
       clearTimeout(typingPulseTimeout);
       isPulsing = true;
-      typingPulseTimeout = window.setTimeout(() => isPulsing = false, 100);
+      typingPulseTimeout = window.setTimeout(() => (isPulsing = false), 100);
     }
   }
 
@@ -238,6 +294,7 @@
         searchOpenLibrary(query),
         searchAnilist(query)
       ]);
+
       apiResults.openlibrary = openLibraryResults;
       apiResults.anilist = anilistResults;
 
@@ -261,15 +318,18 @@
 
   async function saveBook(event: CustomEvent) {
     const { status, pagesRead, totalPages, book } = event.detail;
+
     isPulsing = true;
-    setTimeout(() => isPulsing = false, 600);
+    setTimeout(() => (isPulsing = false), 600);
+
     showAddDialog = false;
     pendingBook = null;
+
     searchState = "idle";
     foundBooks = [];
     apiResults = { openlibrary: null, anilist: null };
     lastQuery = "";
-    
+
     try {
       await invoke('add_book', {
         title: book.title,
@@ -281,7 +341,7 @@
       });
     } catch (err) {
       showDuplicateToast = true;
-      setTimeout(() => showDuplicateToast = false, 3000);
+      setTimeout(() => (showDuplicateToast = false), 3000);
     }
   }
 </script>
@@ -291,21 +351,23 @@
   <Sidebar bind:activeTab={activeTab} />
 
   <section class="orb-stage">
-    
-    <!-- MAIN ORB: Shrinks when going to Settings -->
     {#if activeTab !== "settings"}
-      <div 
+      <div
         class="orb-wrapper"
-        out:scale={{ duration: 400, easing: cubicIn, start: 0.2 }} 
         in:scale={{ duration: 600, easing: cubicOut, start: 0.2, delay: 200 }}
+        out:scale={{ duration: 650, easing: cubicIn, start: 0.12 }}
+        on:outroend={handleOrbOutroEnd}
       >
         <Orb
           bind:orbElement={orbElement}
-          {activeTab} {isReturning} {returnStage} {isGlowing} {isPulsing}
+          {activeTab}
+          {isReturning}
+          {returnStage}
+          {isGlowing}
+          {isPulsing}
           shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
           isAdding={showAddDialog}
         >
-          <!-- HOME CONTENT -->
           {#if activeTab === "home" && !isReturning}
             <div class="search-container" in:fade={{ duration: 300, delay: 200 }} out:fade={{ duration: 200 }}>
               <BookSearchModule
@@ -319,8 +381,8 @@
                 on:focus={handleFocus}
                 on:blur={handleBlur}
                 on:add={handleAddRequest}
-                on:openSummary={(e) => summaryBook = e.detail}
-                on:done={() => { 
+                on:openSummary={(e) => (summaryBook = e.detail)}
+                on:done={() => {
                   searchState = "idle";
                   foundBooks = [];
                   apiResults = { openlibrary: null, anilist: null };
@@ -329,11 +391,9 @@
                 on:apiSwitch={(e) => handleApiSwitch(e.detail)}
               />
             </div>
-
-          <!-- LIBRARY CONTENT -->
           {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-            <div 
-              class="library-container" 
+            <div
+              class="library-container"
               class:fade-out={returnStage === "fading"}
               in:fade={{ duration: 400, delay: 300 }}
             >
@@ -344,27 +404,19 @@
       </div>
     {/if}
 
-    <!-- SETTINGS VIEW -->
-    <!-- FIX: Removed delay so bubbles start flying out AS the orb shrinks.
-         This creates the "dividing" effect. -->
     {#if activeTab === "settings"}
-      <div 
-        class="settings-layer"
-        in:fade={{ duration: 0, delay: 0 }} 
-        out:fade={{ duration: 200 }}
-      >
-        <Settings />
+      <div class="settings-layer">
+        <Settings stage={settingsStage} />
       </div>
     {/if}
-
   </section>
 
   {#if summaryBook}
-    <SummaryModal book={summaryBook} on:close={() => summaryBook = null} />
+    <SummaryModal book={summaryBook} on:close={() => (summaryBook = null)} />
   {/if}
 
   {#if showAddDialog && pendingBook}
-    <AddBookDialog book={pendingBook} on:cancel={() => showAddDialog = false} on:save={saveBook} />
+    <AddBookDialog book={pendingBook} on:cancel={() => (showAddDialog = false)} on:save={saveBook} />
   {/if}
 
   {#if showDuplicateToast}
@@ -375,7 +427,7 @@
 <style>
   main { display: flex; height: 100vh; width: 100vw; position: relative; }
   .orb-stage { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; z-index: 5; }
-  
+
   .orb-wrapper, .settings-layer {
     width: 100%;
     height: 100%;
@@ -384,6 +436,12 @@
     align-items: center;
     position: absolute;
   }
+
+  /* Collapse toward its own center (reduces “drift” while scaling) */
+  .orb-wrapper { transform-origin: 50% 50%; }
+
+  .settings-layer { z-index: 1; }
+  .orb-wrapper { z-index: 2; }
 
   .search-container, .library-container { width: 100%; height: 100%; }
   .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }
