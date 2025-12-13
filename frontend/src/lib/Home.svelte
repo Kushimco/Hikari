@@ -395,7 +395,7 @@
             <div
               class="library-container"
               class:fade-out={returnStage === "fading"}
-              in:fade={{ duration: 400, delay: 300 }}
+              in:fade={{ duration: 400, delay: 720 }}
             >
               <Library />
             </div>

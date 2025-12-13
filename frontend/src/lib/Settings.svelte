@@ -21,7 +21,7 @@
   const flyDurationMs = 520;
   const scaleDurationMs = 220;
 
-  // pulse tick key (forces a tiny pulse each spawn)
+  // pulse tick key (forces a pulse each spawn)
   let pulseKey = 0;
 
   function stop() {
@@ -62,10 +62,13 @@
     ? settingsOptions.slice(0, revealCount)
     : [];
 
-  // seed: always visible while collapsing/glowing; during dividing it stays until last bubble appears
-  $: seedVisible = stage === "collapsing" || stage === "glowing" || (stage === "dividing" && revealCount < settingsOptions.length);
+  // seed: visible while collapsing/glowing; during dividing it stays until last bubble appears
+  $: seedVisible =
+    stage === "collapsing" ||
+    stage === "glowing" ||
+    (stage === "dividing" && revealCount < settingsOptions.length);
 
-  // optional: seed “depletes” as it splits
+  // seed “depletes” as it splits (optional)
   $: seedScale = stage === "dividing"
     ? Math.max(0.18, 1 - revealCount / (settingsOptions.length * 1.1))
     : 1;
@@ -89,7 +92,7 @@
       out:scale={{ duration: 260, easing: cubicOut, start: 0 }}
       style="transform: scale({seedScale});"
     >
-      <!-- tiny “tick” pulse each spawn -->
+      <!-- stronger pulse each spawn -->
       {#if stage === "dividing"}
         {#key pulseKey}
           <div class="seed-tick"></div>
@@ -124,7 +127,15 @@
         in:scale={{ start: 0, duration: scaleDurationMs, easing: backOut }}
       >
         <div class="bubble-content">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d={item.path} />
           </svg>
           <span class="label">{item.label}</span>
@@ -143,10 +154,12 @@
     justify-content: center;
     align-items: center;
     pointer-events: none;
+
+    /* Keep this if your Home orb is also offset by the Orb.svelte floater (margin-left: -105px). */
     margin-left: -105px;
   }
 
-  /* seed (glows continuously) */
+  /* SEED: glow all the time */
   .seed {
     position: absolute;
     width: 96px;
@@ -162,31 +175,77 @@
       rgba(255, 189, 245, 0.8) 100%
     );
 
+    /* stronger continuous glow */
     box-shadow:
-      inset 1px 2px 15px rgba(255, 255, 255, 0.7),
-      0 0 60px rgba(255, 220, 180, 0.65);
+      inset 1px 2px 18px rgba(255, 255, 255, 0.75),
+      0 0 95px rgba(255, 220, 180, 0.75),
+      0 0 140px rgba(255, 200, 150, 0.35);
 
-    animation: seedGlow 0.24s ease-in-out infinite alternate;
-    transition: transform 120ms ease-out;
+    filter: brightness(1.08);
+    animation: seedGlowAlways 0.22s ease-in-out infinite alternate;
+    transition: transform 110ms ease-out;
   }
 
-  @keyframes seedGlow {
-    from { filter: brightness(1); }
-    to { filter: brightness(1.18); box-shadow: 0 0 85px rgba(255, 220, 180, 0.9); }
+  /* extra aura, closer to your orb vibe */
+  .seed::before {
+    content: "";
+    position: absolute;
+    inset: -26px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 230, 200, 0.55), rgba(255, 200, 160, 0) 65%);
+    filter: blur(16px);
+    opacity: 1;
+    pointer-events: none;
   }
 
-  /* quick per-spawn pulse */
+  @keyframes seedGlowAlways {
+    from {
+      filter: brightness(1.05);
+      box-shadow:
+        inset 1px 2px 18px rgba(255, 255, 255, 0.72),
+        0 0 85px rgba(255, 220, 180, 0.70),
+        0 0 120px rgba(255, 200, 150, 0.30);
+    }
+    to {
+      filter: brightness(1.22);
+      box-shadow:
+        inset 0 0 24px rgba(255, 255, 255, 0.92),
+        0 0 130px rgba(255, 220, 180, 0.95),
+        0 0 210px rgba(255, 200, 150, 0.55);
+    }
+  }
+
+  /* Stronger per-spawn pulse */
   .seed-tick {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    animation: seedTick 0.14s ease-out forwards;
+    animation: seedTickStrong 0.18s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+    pointer-events: none;
   }
 
-  @keyframes seedTick {
-    0% { transform: scale(1); }
-    55% { transform: scale(1.08); }
-    100% { transform: scale(1); }
+  @keyframes seedTickStrong {
+    0% {
+      transform: scale(1);
+      filter: brightness(1);
+      box-shadow: none;
+      opacity: 1;
+    }
+    40% {
+      transform: scale(1.16);
+      filter: brightness(1.35);
+      box-shadow:
+        0 0 35px rgba(255, 255, 255, 0.55),
+        0 0 95px rgba(255, 220, 180, 0.90),
+        0 0 160px rgba(255, 200, 150, 0.60);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      filter: brightness(1);
+      box-shadow: none;
+      opacity: 1;
+    }
   }
 
   .bubble {
@@ -243,7 +302,6 @@
       0 15px 40px rgba(94, 75, 75, 0.2);
   }
 
-  /* click pop (small & fast) */
   @keyframes clickPop {
     0% { transform: scale(1); }
     40% { transform: scale(1.06); filter: brightness(1.1); }
