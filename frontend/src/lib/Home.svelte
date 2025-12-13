@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { fade } from 'svelte/transition';
+  import { fade, scale } from 'svelte/transition';
+  import { cubicIn, cubicOut } from 'svelte/easing';
 
   // Components
   import Sidebar from './Sidebar.svelte';
@@ -47,7 +48,7 @@
   
   // --- ANIMATION TRIGGER LOGIC ---
   $: if (activeTab !== previousTab) {
-    if ((previousTab === "menu" || previousTab === "settings") && activeTab === "home") {
+    if (activeTab === "home") {
       triggerBounceSequence();
     }
     previousTab = activeTab;
@@ -56,7 +57,7 @@
   async function triggerBounceSequence() {
     isReturning = true;
     returnStage = "fading";
-    await wait(250); // Matches CSS transition time
+    await wait(250);
     returnStage = "bouncing_down";
     await wait(700);
     returnStage = "bouncing_up";
@@ -175,11 +176,12 @@
     }
   }
 
-  // --- ORB ANIMATION LOGIC ---
+  // --- ORB INTERACTION ---
   function handleFocus() {
-    if (activeTab !== "home") return;
-    isFocused = true;
-    settleOrbToCenter();
+    if (activeTab === "home") {
+      isFocused = true;
+      settleOrbToCenter();
+    }
   }
 
   function handleBlur() {
@@ -190,27 +192,35 @@
   function settleOrbToCenter() {
     if (!orbElement) return;
     const el = orbElement;
-    const currentTransform = getComputedStyle(el).transform;
+    
+    // FIX: Use transform instead of margin-top for smoother animation
+    const computedStyle = window.getComputedStyle(el);
+    const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
+
     el.style.animation = "none";
     el.style.transform = currentTransform;
+    el.offsetHeight; // Force reflow
+
     requestAnimationFrame(() => {
       el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
-      el.style.transform = "translateY(0)";
+      el.style.transform = "translateY(0)"; // Glide to absolute center
     });
   }
 
   function restoreOrbFloat() {
     if (!orbElement) return;
-    orbElement.style.transition = "";
+    // Clear inline styles to restore CSS keyframe animation
+    orbElement.style.transition = ""; 
     orbElement.style.transform = "";
     orbElement.style.animation = "";
   }
 
   function handleInput() {
-    if (activeTab !== "home") return;
-    clearTimeout(typingPulseTimeout);
-    isPulsing = true;
-    typingPulseTimeout = window.setTimeout(() => isPulsing = false, 100);
+    if (activeTab === "home") {
+      clearTimeout(typingPulseTimeout);
+      isPulsing = true;
+      typingPulseTimeout = window.setTimeout(() => isPulsing = false, 100);
+    }
   }
 
   // --- DATA & MODALS ---
@@ -282,60 +292,65 @@
   <Sidebar bind:activeTab={activeTab} />
 
   <section class="orb-stage">
-    <Orb
-      bind:orbElement={orbElement}
-      {activeTab} {isReturning} {returnStage} {isGlowing} {isPulsing}
-      shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
-      isAdding={showAddDialog}
-    >
-      <!-- HOME View -->
-      {#if activeTab === "home" && !isReturning}
-        <div class="search-container" in:fade={{ duration: 300, delay: 200 }} out:fade={{ duration: 200 }}>
-          <BookSearchModule
-            bind:bookTitle={bookTitle}
-            {searchState}
-            books={foundBooks}
-            {selectedApi}
-            {isApiSwitching}
-            on:input={handleInput}
-            on:keydown={handleKeydown}
-            on:focus={handleFocus}
-            on:blur={handleBlur}
-            on:add={handleAddRequest}
-            on:openSummary={(e) => summaryBook = e.detail}
-            on:done={() => { 
-              searchState = "idle";
-              foundBooks = [];
-              apiResults = { openlibrary: null, anilist: null };
-              lastQuery = "";
-            }}
-            on:apiSwitch={(e) => handleApiSwitch(e.detail)}
-          />
-        </div>
-
-      <!-- LIBRARY View -->
-      <!-- ADDED: in:fade with delay for entry. -->
-      {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-        <div 
-          class="library-container" 
-          class:fade-out={returnStage === "fading"}
-          in:fade={{ duration: 200, delay: 900 }}
+    
+    {#if activeTab !== "settings"}
+      <div 
+        class="orb-wrapper"
+        out:scale={{ duration: 400, easing: cubicIn, start: 0.2 }} 
+        in:scale={{ duration: 600, easing: cubicOut, start: 0.2, delay: 200 }}
+      >
+        <Orb
+          bind:orbElement={orbElement}
+          {activeTab} {isReturning} {returnStage} {isGlowing} {isPulsing}
+          shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
+          isAdding={showAddDialog}
         >
-          <Library />
-        </div>
+          <!-- HOME CONTENT -->
+          {#if activeTab === "home" && !isReturning}
+            <div class="search-container" in:fade={{ duration: 300, delay: 200 }} out:fade={{ duration: 200 }}>
+              <BookSearchModule
+                bind:bookTitle={bookTitle}
+                {searchState}
+                books={foundBooks}
+                {selectedApi}
+                {isApiSwitching}
+                on:input={handleInput}
+                on:keydown={handleKeydown}
+                on:focus={handleFocus}
+                on:blur={handleBlur}
+                on:add={handleAddRequest}
+                on:openSummary={(e) => summaryBook = e.detail}
+                on:done={() => { 
+                  searchState = "idle";
+                  foundBooks = [];
+                  apiResults = { openlibrary: null, anilist: null };
+                  lastQuery = "";
+                }}
+                on:apiSwitch={(e) => handleApiSwitch(e.detail)}
+              />
+            </div>
 
-      <!-- SETTINGS View -->
-      <!-- ADDED: in:fade with delay for entry. -->
-      {:else if activeTab === "settings" || (isReturning && returnStage === "fading" && previousTab === "settings")}
-        <div 
-          class="settings-container" 
-          class:fade-out={returnStage === "fading"}
-          in:fade={{ duration: 400, delay: 300 }}
-        >
-           <Settings />
-        </div>
-      {/if}
-    </Orb>
+          <!-- LIBRARY CONTENT -->
+          {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
+            <div 
+              class="library-container" 
+              class:fade-out={returnStage === "fading"}
+              in:fade={{ duration: 400, delay: 300 }}
+            >
+              <Library />
+            </div>
+          {/if}
+        </Orb>
+      </div>
+    {/if}
+
+    <!-- SETTINGS VIEW -->
+    {#if activeTab === "settings"}
+      <div class="settings-layer">
+        <Settings />
+      </div>
+    {/if}
+
   </section>
 
   {#if summaryBook}
@@ -355,18 +370,18 @@
   main { display: flex; height: 100vh; width: 100vw; position: relative; }
   .orb-stage { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; z-index: 5; }
   
-  .search-container, .library-container, .settings-container { width: 100%; height: 100%; }
-  .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }
-  
-  /* ENTRY ANIMATION HANDLED BY SVELTE (in:fade) */
-  .library-container, .settings-container {
-    opacity: 1;
-    /* Removed transition here to avoid conflict with Svelte entry fade */
+  .orb-wrapper, .settings-layer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: absolute;
   }
 
-  /* EXIT ANIMATION HANDLED BY CSS CLASS */
-  .library-container.fade-out, .settings-container.fade-out {
-    opacity: 0;
-    transition: opacity 0.25s ease-out; /* Only apply transition during fade out */
-  }
+  .search-container, .library-container { width: 100%; height: 100%; }
+  .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }
+
+  .library-container { opacity: 1; }
+  .library-container.fade-out { opacity: 0; transition: opacity 0.25s ease-out; }
 </style>
