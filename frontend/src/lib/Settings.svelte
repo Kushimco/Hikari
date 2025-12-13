@@ -1,8 +1,11 @@
 <script lang="ts">
   import { fly, scale } from 'svelte/transition';
   import { elasticOut, cubicOut, backOut } from 'svelte/easing';
+  import { createEventDispatcher } from 'svelte';
 
-  export let stage: "idle" | "collapsing" | "glowing" | "dividing" = "idle";
+  export let stage: "idle" | "collapsing" | "glowing" | "dividing" | "gathering" = "idle";
+
+  const dispatch = createEventDispatcher<{ readyToExpand: void }>();
 
   const settingsOptions = [
     { id: 'export', label: 'Backup',  path: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3' },
@@ -12,16 +15,19 @@
     { id: 'about',  label: 'About',   path: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 16v-4 M12 8h.01' },
   ].map((o, idx) => ({ ...o, idx }));
 
-  // division reveal
+  const total = settingsOptions.length;
+
+  // division/gather reveal
   let revealCount = 0;
   let timer: number | null = null;
   let lastStage: typeof stage = "idle";
 
-  const spawnEveryMs = 90;     // fast “one by one”
+  const spawnEveryMs = 90;     // one-by-one outward
+  const gatherEveryMs = 85;    // one-by-one inward
   const flyDurationMs = 520;
   const scaleDurationMs = 220;
 
-  // pulse tick key (forces a pulse each spawn)
+  // pulse tick key (fires each spawn/collect)
   let pulseKey = 0;
 
   function stop() {
@@ -31,7 +37,7 @@
     }
   }
 
-  function start() {
+  function startDividing() {
     stop();
     revealCount = 0;
     pulseKey = 0;
@@ -40,41 +46,76 @@
       revealCount += 1;
       pulseKey += 1;
 
-      if (revealCount >= settingsOptions.length) {
-        revealCount = settingsOptions.length;
+      if (revealCount >= total) {
+        revealCount = total;
         stop();
       }
     }, spawnEveryMs);
   }
 
+  function startGathering() {
+    stop();
+    pulseKey = 0;
+
+    // start from all bubbles visible
+    revealCount = total;
+
+    timer = window.setInterval(() => {
+      // remove one bubble => triggers its out:fly/out:scale [web:23]
+      revealCount -= 1;
+      pulseKey += 1;
+
+      if (revealCount <= 0) {
+        revealCount = 0;
+        stop();
+
+        // small beat so the final merge reads
+        window.setTimeout(() => {
+          dispatch('readyToExpand');
+        }, 180);
+      }
+    }, gatherEveryMs);
+  }
+
   $: {
     if (stage !== lastStage) {
-      if (stage === "dividing") start();
+      if (stage === "dividing") startDividing();
+      else if (stage === "gathering") startGathering();
       else {
         stop();
-        revealCount = 0;
+        if (stage === "idle") revealCount = 0;
       }
       lastStage = stage;
     }
   }
 
-  $: visibleOptions = stage === "dividing"
-    ? settingsOptions.slice(0, revealCount)
-    : [];
+  // Keep bubbles mounted only during dividing/gathering
+  $: visibleOptions =
+    (stage === "dividing" || stage === "gathering")
+      ? settingsOptions.slice(0, revealCount)
+      : [];
 
-  // seed: visible while collapsing/glowing; during dividing it stays until last bubble appears
+  // Seed visible during all non-idle stages
   $: seedVisible =
     stage === "collapsing" ||
     stage === "glowing" ||
-    (stage === "dividing" && revealCount < settingsOptions.length);
+    stage === "dividing" ||
+    stage === "gathering";
 
-  // seed “depletes” as it splits (optional)
-  $: seedScale = stage === "dividing"
-    ? Math.max(0.18, 1 - revealCount / (settingsOptions.length * 1.1))
-    : 1;
+  // Seed scale: shrink while dividing, grow while gathering
+  $: seedScale = (() => {
+    if (stage === "dividing") {
+      return Math.max(0.18, 1 - revealCount / (total * 1.1));
+    }
+    if (stage === "gathering") {
+      const collected = total - revealCount;
+      return Math.min(1, 0.18 + (collected / total) * 0.82);
+    }
+    return 1;
+  })();
 
-  function getPosition(index: number, total: number, radius: number) {
-    const angle = (index / total) * 2 * Math.PI - (Math.PI / 2);
+  function getPosition(index: number, totalCount: number, radius: number) {
+    const angle = (index / totalCount) * 2 * Math.PI - (Math.PI / 2);
     return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
   }
 
@@ -92,8 +133,7 @@
       out:scale={{ duration: 260, easing: cubicOut, start: 0 }}
       style="transform: scale({seedScale});"
     >
-      <!-- stronger pulse each spawn -->
-      {#if stage === "dividing"}
+      {#if stage === "dividing" || stage === "gathering"}
         {#key pulseKey}
           <div class="seed-tick"></div>
         {/key}
@@ -102,7 +142,7 @@
   {/if}
 
   {#each visibleOptions as item (item.id)}
-    {@const pos = getPosition(item.idx, settingsOptions.length, 145)}
+    {@const pos = getPosition(item.idx, total, 145)}
 
     <button
       class="bubble"
@@ -118,24 +158,24 @@
         duration: flyDurationMs,
         easing: elasticOut
       }}
+      out:fly={{
+        x: -pos.x,
+        y: -pos.y,
+        duration: 420,
+        easing: backOut
+      }}
       on:click={() => handleClick(item.id)}
       aria-label={item.label}
     >
       <div
         class="bubble-skin"
+        class:returning={stage === "gathering"}
         class:click-pulse={pulsingId === item.id}
         in:scale={{ start: 0, duration: scaleDurationMs, easing: backOut }}
+        out:scale={{ start: 0, duration: 220, easing: cubicOut }}
       >
         <div class="bubble-content">
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d={item.path} />
           </svg>
           <span class="label">{item.label}</span>
@@ -155,7 +195,7 @@
     align-items: center;
     pointer-events: none;
 
-    /* Keep this if your Home orb is also offset by the Orb.svelte floater (margin-left: -105px). */
+    /* Keep this if your Orb.svelte floater uses margin-left:-105px (yours does). */
     margin-left: -105px;
   }
 
@@ -175,7 +215,6 @@
       rgba(255, 189, 245, 0.8) 100%
     );
 
-    /* stronger continuous glow */
     box-shadow:
       inset 1px 2px 18px rgba(255, 255, 255, 0.75),
       0 0 95px rgba(255, 220, 180, 0.75),
@@ -186,7 +225,6 @@
     transition: transform 110ms ease-out;
   }
 
-  /* extra aura, closer to your orb vibe */
   .seed::before {
     content: "";
     position: absolute;
@@ -215,7 +253,7 @@
     }
   }
 
-  /* Stronger per-spawn pulse */
+  /* Strong per-bubble pulse */
   .seed-tick {
     position: absolute;
     inset: 0;
@@ -225,12 +263,7 @@
   }
 
   @keyframes seedTickStrong {
-    0% {
-      transform: scale(1);
-      filter: brightness(1);
-      box-shadow: none;
-      opacity: 1;
-    }
+    0% { transform: scale(1); filter: brightness(1); box-shadow: none; opacity: 1; }
     40% {
       transform: scale(1.16);
       filter: brightness(1.35);
@@ -240,12 +273,7 @@
         0 0 160px rgba(255, 200, 150, 0.60);
       opacity: 1;
     }
-    100% {
-      transform: scale(1);
-      filter: brightness(1);
-      box-shadow: none;
-      opacity: 1;
-    }
+    100% { transform: scale(1); filter: brightness(1); box-shadow: none; opacity: 1; }
   }
 
   .bubble {
@@ -284,9 +312,13 @@
 
     transition: box-shadow 0.3s ease, filter 0.2s ease;
 
-    /* float starts after fly-in */
     animation: floatY 3.2s ease-in-out infinite;
     animation-delay: calc(var(--float-start-delay) + var(--float-delay));
+  }
+
+  /* Disable float while gathering (prevents jitter during out:fly) */
+  .bubble-skin.returning {
+    animation: none;
   }
 
   @keyframes floatY {
@@ -322,9 +354,7 @@
     box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.9);
   }
 
-  .bubble:hover .glow-layer {
-    opacity: 1;
-  }
+  .bubble:hover .glow-layer { opacity: 1; }
 
   .bubble-content {
     position: relative;

@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { fade, scale } from 'svelte/transition';
   import { cubicIn, cubicOut } from 'svelte/easing';
+  import { tick } from 'svelte';
 
   // Components
   import Sidebar from './Sidebar.svelte';
@@ -14,21 +15,39 @@
   import SummaryModal from './home-components/SummaryModal.svelte';
   import Toast from './home-components/Toast.svelte';
 
-  // State
+  // --- Tabs ---
+  let requestedTab: "home" | "menu" | "settings" = "home";
   let activeTab: "home" | "menu" | "settings" = "home";
   let previousTab: "home" | "menu" | "settings" = activeTab;
 
-  // --- SETTINGS ANIMATION STATE ---
-  // "idle": Normal
-  // "collapsing": home orb outro (shrinks)
-  // "glowing": seed visible + glowing (Settings)
-  // "dividing": seed spawns bubbles (Settings)
-  let settingsStage: "idle" | "collapsing" | "glowing" | "dividing" = "idle";
-
-  // Tracks whether we are currently performing the Home/Menu -> Settings transition
+  // --- Settings animation stages ---
+  let settingsStage: "idle" | "collapsing" | "glowing" | "dividing" | "gathering" = "idle";
   let isOpeningSettings = false;
 
-  // Return animation
+  // --- Return from settings -> home ---
+  let returningFromSettings = false;
+
+  // Overlay expansion (the “big expand” after gather)
+  let showHomeExpandOrb = false;
+
+  // Keep overlay mounted while we fade its glow out
+  let overlayHoldVisible = false;
+  let overlayGlowOff = false;
+
+  // Prevent second “home orb intro / bounce” after overlay expansion
+  let skipHomeIntroOnce = false;
+  let suppressHomeBounceOnce = false;
+
+  // --- Overlay timing (MUST match CSS durations below) ---
+  const overlayExpandMs = 650;
+
+  // Total fade duration (match .expand-overlay transition)
+  const overlayFadeMs = 900;
+
+  // Start fading this much BEFORE expand ends (so it begins disappearing sooner)
+  const overlayFadeLeadMs = 250;
+
+  // Return animation (your existing home bounce)
   let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
   let isReturning = false;
 
@@ -54,35 +73,51 @@
   let summaryBook: any | null = null;
   let orbElement: HTMLDivElement | null = null;
 
-  // IMPORTANT: keep glow during collapsing (so the tiny orb still has aura)
+  // Keep glow while collapsing + while overlay is visible
   $: isGlowing =
     (isReturning && returnStage !== "idle") ||
     isFocused ||
     searchState !== "idle" ||
     showAddDialog ||
     isPulsing ||
-    settingsStage === "collapsing";
+    settingsStage === "collapsing" ||
+    showHomeExpandOrb ||
+    overlayHoldVisible;
 
   function wait(ms: number) {
     return new Promise<void>((r) => setTimeout(r, ms));
   }
 
-  // --- TAB SWITCH LOGIC ---
+  // Intercept requested tab changes to allow animations
+  $: if (requestedTab !== activeTab) {
+    // SETTINGS -> HOME (play gathering first)
+    if (activeTab === "settings" && requestedTab === "home" && !returningFromSettings) {
+      returningFromSettings = true;
+      settingsStage = "gathering";
+    }
+    // Normal switch (no special animation)
+    else if (!returningFromSettings) {
+      activeTab = requestedTab;
+    }
+  }
+
+  // Track previous tab for other logic
   $: if (activeTab !== previousTab) {
+    // Returning to home bounce (disable if we just came from settings expansion)
     if (activeTab === "home") {
-      triggerBounceSequence();
+      if (!suppressHomeBounceOnce) {
+        triggerBounceSequence();
+      }
     }
 
     // Going TO settings: start collapsing immediately
     if (activeTab === "settings" && previousTab !== "settings") {
-      // prevent any “settle to center” inline transform from fighting the scale outro
       restoreOrbFloat();
-
       isOpeningSettings = true;
       settingsStage = "collapsing";
     }
 
-    // Leaving settings: reset
+    // Leaving settings (after commit)
     if (previousTab === "settings" && activeTab !== "settings") {
       isOpeningSettings = false;
       settingsStage = "idle";
@@ -103,18 +138,109 @@
     isReturning = false;
   }
 
-  // Called exactly when the big orb OUT transition completes (seamless chaining)
+  // Called when big orb OUT transition completes (home->settings chain)
   async function handleOrbOutroEnd() {
     if (!isOpeningSettings) return;
 
     settingsStage = "glowing";
     await wait(240);
 
-    if (activeTab === "settings") {
-      settingsStage = "dividing";
-    }
-
+    if (activeTab === "settings") settingsStage = "dividing";
     isOpeningSettings = false;
+  }
+
+  // SETTINGS -> HOME: called by Settings when all bubbles have merged into seed
+  async function handleSettingsReadyToExpand() {
+    if (!returningFromSettings) return;
+
+    // 1) Expand overlay orb ONCE (keep it mounted afterward for glow fade)
+    overlayHoldVisible = true;
+    overlayGlowOff = false;
+    showHomeExpandOrb = true;
+
+    // Start fading BEFORE the expand ends (so glow starts disappearing sooner)
+    const fadeStartAt = Math.max(0, overlayExpandMs - overlayFadeLeadMs);
+    const fadeTimer = window.setTimeout(() => {
+      overlayGlowOff = true;
+    }, fadeStartAt);
+
+    await wait(overlayExpandMs); // must match overlay in:scale duration
+
+    // Expand finished; stop showing "expand overlay" transition wrapper
+    showHomeExpandOrb = false;
+
+    // 2) Commit to Home but skip Home's own orb intro/bounce for the first render
+    suppressHomeBounceOnce = true;
+    skipHomeIntroOnce = true;
+
+    returningFromSettings = false;
+    settingsStage = "idle";
+    activeTab = "home";
+    requestedTab = "home";
+
+    // Wait until the DOM applied the Home mount before clearing flags
+    await tick();
+
+    suppressHomeBounceOnce = false;
+    skipHomeIntroOnce = false;
+
+    // Ensure fade definitely started (in case timings were changed)
+    // (If it already started, setting true again is harmless.)
+    overlayGlowOff = true;
+    clearTimeout(fadeTimer);
+
+    // Only keep overlay mounted for the REMAINING fade time (no lingering)
+    const elapsedFadeByNow = overlayExpandMs - fadeStartAt;
+    const remainingFade = Math.max(0, overlayFadeMs - elapsedFadeByNow);
+    await wait(remainingFade);
+
+    overlayHoldVisible = false;
+    overlayGlowOff = false;
+  }
+
+  // --- ORB HANDLERS ---
+  function handleFocus() {
+    if (activeTab === "home") {
+      isFocused = true;
+      settleOrbToCenter();
+    }
+  }
+
+  function handleBlur() {
+    isFocused = false;
+    restoreOrbFloat();
+  }
+
+  function settleOrbToCenter() {
+    if (!orbElement) return;
+    const el = orbElement;
+
+    const computedStyle = window.getComputedStyle(el);
+    const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
+
+    el.style.animation = "none";
+    el.style.transform = currentTransform;
+    el.offsetHeight;
+
+    requestAnimationFrame(() => {
+      el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
+      el.style.transform = "translateY(0)";
+    });
+  }
+
+  function restoreOrbFloat() {
+    if (!orbElement) return;
+    orbElement.style.transition = "";
+    orbElement.style.transform = "";
+    orbElement.style.animation = "";
+  }
+
+  function handleInput() {
+    if (activeTab === "home") {
+      clearTimeout(typingPulseTimeout);
+      isPulsing = true;
+      typingPulseTimeout = window.setTimeout(() => (isPulsing = false), 100);
+    }
   }
 
   // --- API FUNCTIONS ---
@@ -186,7 +312,6 @@
       });
 
       if (!anilistRes.ok) return [];
-
       const anilistData = await anilistRes.json();
       const media = anilistData.data?.Page?.media ?? [];
 
@@ -230,51 +355,6 @@
       foundBooks = [];
     } finally {
       isApiSwitching = false;
-    }
-  }
-
-  // --- ORB HANDLERS ---
-  function handleFocus() {
-    if (activeTab === "home") {
-      isFocused = true;
-      settleOrbToCenter();
-    }
-  }
-
-  function handleBlur() {
-    isFocused = false;
-    restoreOrbFloat();
-  }
-
-  function settleOrbToCenter() {
-    if (!orbElement) return;
-    const el = orbElement;
-
-    const computedStyle = window.getComputedStyle(el);
-    const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
-
-    el.style.animation = "none";
-    el.style.transform = currentTransform;
-    el.offsetHeight;
-
-    requestAnimationFrame(() => {
-      el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
-      el.style.transform = "translateY(0)";
-    });
-  }
-
-  function restoreOrbFloat() {
-    if (!orbElement) return;
-    orbElement.style.transition = "";
-    orbElement.style.transform = "";
-    orbElement.style.animation = "";
-  }
-
-  function handleInput() {
-    if (activeTab === "home") {
-      clearTimeout(typingPulseTimeout);
-      isPulsing = true;
-      typingPulseTimeout = window.setTimeout(() => (isPulsing = false), 100);
     }
   }
 
@@ -348,13 +428,24 @@
 
 <main>
   <Background />
-  <Sidebar bind:activeTab={activeTab} />
+  <Sidebar bind:activeTab={requestedTab} />
 
   <section class="orb-stage">
+    <!-- SETTINGS stays mounted while gathering/expanding back -->
+    {#if activeTab === "settings"}
+      <div class="settings-layer">
+        <Settings stage={settingsStage} on:readyToExpand={handleSettingsReadyToExpand} />
+      </div>
+    {/if}
+
+    <!-- Normal orb when not in settings -->
     {#if activeTab !== "settings"}
       <div
         class="orb-wrapper"
-        in:scale={{ duration: 600, easing: cubicOut, start: 0.2, delay: 200 }}
+        in:scale={skipHomeIntroOnce
+          ? { duration: 0 }
+          : { duration: 600, easing: cubicOut, start: 0.2, delay: 200 }
+        }
         out:scale={{ duration: 650, easing: cubicIn, start: 0.12 }}
         on:outroend={handleOrbOutroEnd}
       >
@@ -369,7 +460,7 @@
           isAdding={showAddDialog}
         >
           {#if activeTab === "home" && !isReturning}
-            <div class="search-container" in:fade={{ duration: 300, delay: 200 }} out:fade={{ duration: 200 }}>
+            <div class="search-container" in:fade={{ duration: 260, delay: 80 }} out:fade={{ duration: 180 }}>
               <BookSearchModule
                 bind:bookTitle={bookTitle}
                 {searchState}
@@ -392,11 +483,8 @@
               />
             </div>
           {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-            <div
-              class="library-container"
-              class:fade-out={returnStage === "fading"}
-              in:fade={{ duration: 400, delay: 720 }}
-            >
+            <!-- keep your requested 700ms delay -->
+            <div class="library-container" class:fade-out={returnStage === "fading"} in:fade={{ duration: 400, delay: 700 }}>
               <Library />
             </div>
           {/if}
@@ -404,9 +492,23 @@
       </div>
     {/if}
 
-    {#if activeTab === "settings"}
-      <div class="settings-layer">
-        <Settings stage={settingsStage} />
+    <!-- EXPAND overlay orb while still “in settings”, and keep it during glow fade-out -->
+    {#if showHomeExpandOrb || overlayHoldVisible}
+      <div
+        class="orb-wrapper expand-overlay"
+        class:fade-overlay={overlayGlowOff}
+        in:scale={{ duration: 650, easing: cubicOut, start: 0.12 }}
+      >
+        <Orb
+          bind:orbElement={orbElement}
+          activeTab={"home"}
+          isReturning={false}
+          returnStage={"idle"}
+          isGlowing={!overlayGlowOff}
+          shouldScale={false}
+          isPulsing={false}
+          isAdding={false}
+        />
       </div>
     {/if}
   </section>
@@ -437,11 +539,20 @@
     position: absolute;
   }
 
-  /* Collapse toward its own center (reduces “drift” while scaling) */
   .orb-wrapper { transform-origin: 50% 50%; }
 
   .settings-layer { z-index: 1; }
   .orb-wrapper { z-index: 2; }
+  .orb-wrapper.expand-overlay { z-index: 3; pointer-events: none; }
+
+  /* Fade must match overlayFadeMs (900ms) and should be smooth (no linger). */
+  .expand-overlay {
+    opacity: 1;
+    transition: opacity 900ms cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  .expand-overlay.fade-overlay {
+    opacity: 0;
+  }
 
   .search-container, .library-container { width: 100%; height: 100%; }
   .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }

@@ -33,6 +33,12 @@
 </div>
 
 <style>
+  /* Match this to Home.svelte's overlay fade time */
+  :root {
+    --glow-fade: 900ms;
+    --glow-ease: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+
   .orb-floater {
     width: 780px;
     height: 780px;
@@ -77,23 +83,28 @@
       rgba(244, 202, 167, 0.9) 60%,
       rgba(255, 189, 245, 0.7) 90%
     );
+
     box-shadow:
       inset 2px 4px 20px rgba(255, 255, 255, 0.6),
       inset -2px -4px 30px rgba(0, 0, 0, 0.05),
       0 25px 60px rgba(219, 168, 172, 0.35);
+
     display: flex;
     justify-content: center;
     align-items: center;
     max-width: 780px;
     max-height: 780px;
+
     transition:
-      box-shadow 2.5s ease,
+      /* Make glow-related shadow changes finish on the same schedule */
+      box-shadow var(--glow-fade) var(--glow-ease),
       width 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       height 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       border-radius 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       background 1.5s ease,
       transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1),
-      filter 0.6s ease;
+      filter var(--glow-fade) var(--glow-ease);
+
     animation: float 8s ease-in-out infinite;
   }
 
@@ -102,13 +113,19 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
+
     box-shadow:
       inset 0 0 30px rgba(255, 255, 255, 0.9),
       0 0 120px rgba(255, 220, 180, 0.8),
       0 0 200px rgba(255, 200, 150, 0.4);
+
     opacity: 0;
     pointer-events: none;
-    transition: opacity 1.2s ease-out;
+
+    transition:
+      opacity var(--glow-fade) var(--glow-ease),
+      box-shadow var(--glow-fade) var(--glow-ease);
+
     z-index: -1;
   }
 
@@ -158,17 +175,21 @@
     cursor: default;
     scrollbar-width: none;
     transform: scale(1) !important;
+
     box-shadow:
       inset 0 0 30px rgba(255, 255, 255, 0.9),
       0 0 120px rgba(255, 220, 180, 0.8),
       0 0 200px rgba(255, 200, 150, 0.4);
+
     filter: brightness(1.05);
+
     transition:
       width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       background 1.5s ease,
-      box-shadow 1.5s ease-in-out 0.3s;
+      box-shadow var(--glow-fade) var(--glow-ease),
+      filter var(--glow-fade) var(--glow-ease);
   }
 
   .orb.expanded::-webkit-scrollbar { display: none; }
