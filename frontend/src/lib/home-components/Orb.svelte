@@ -203,7 +203,7 @@
   }
 
   .orb.pulsing {
-    transform: scale(1.05) !important;
+    transform: translateY(0) scale(1.05) !important;
     transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 </style>

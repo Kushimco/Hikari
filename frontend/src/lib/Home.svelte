@@ -9,14 +9,13 @@
   import Background from './home-components/Background.svelte';
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
-  import AddBookModal from './home-components/AddBookModal.svelte';
+  import AddBookDialog from './home-components/AddBookModal.svelte';
   import SummaryModal from './home-components/SummaryModal.svelte';
   import Toast from './home-components/Toast.svelte';
 
   // State
-  // FIX: Type includes "settings" now
   let activeTab: "home" | "menu" | "settings" = "home";
-  //let previousTab: "home" | "menu" | "settings" = activeTab;
+  let previousTab: "home" | "menu" | "settings" = activeTab;
 
   let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
   let isReturning = false;
@@ -44,21 +43,39 @@
   let orbElement: HTMLDivElement | null = null;
 
   // Computed properties
-  let isGlowing = false;
   $: isGlowing = (isReturning && returnStage !== "idle") || isFocused || searchState !== "idle" || showAddDialog || isPulsing;
-  $: showLibrary = activeTab === "menu" || isReturning;
+  
+  // --- ANIMATION TRIGGER LOGIC ---
+  $: if (activeTab !== previousTab) {
+    if ((previousTab === "menu" || previousTab === "settings") && activeTab === "home") {
+      triggerBounceSequence();
+    }
+    previousTab = activeTab;
+  }
 
+  async function triggerBounceSequence() {
+    isReturning = true;
+    returnStage = "fading";
+    await wait(250); // Matches CSS transition time
+    returnStage = "bouncing_down";
+    await wait(700);
+    returnStage = "bouncing_up";
+    await wait(600);
+    returnStage = "idle";
+    isReturning = false;
+  }
+  
+  function wait(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+  // --- API FUNCTIONS ---
   async function searchOpenLibrary(query: string): Promise<any[]> {
     try {
       const res = await fetch(
         `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
       );
-
       if (!res.ok) return [];
-
       const data: any = await res.json();
       const docs: any[] = data.docs ?? [];
-
       if (!docs.length) return [];
 
       const books = docs.map(doc => {
@@ -78,44 +95,13 @@
         };
       });
 
-      // Preload cover images
+      // Preload covers
       books.forEach((book: any) => {
         if (book.coverUrl) {
           const img = new Image();
           img.src = book.coverUrl;
         }
       });
-
-      // Fetch descriptions
-      await Promise.all(books.map(async (book: any) => {
-        if (book.key) {
-          try {
-            const descRes = await fetch(`https://openlibrary.org${book.key}.json`);
-            if (descRes.ok) {
-              const descData = await descRes.json();
-              const description = descData.description;
-              if (typeof description === 'string') {
-                book.summary = description.length > 200 ? description.substring(0, 200) + "..." : description;
-                book.fullSummary = description;
-              } else if (description?.value) {
-                const desc = description.value;
-                book.summary = desc.length > 200 ? desc.substring(0, 200) + "..." : desc;
-                book.fullSummary = desc;
-              } else {
-                book.summary = "No description available.";
-              }
-            } else {
-              book.summary = "No description available.";
-            }
-          } catch (err) {
-            console.error("Error fetching description for", book.title, err);
-            book.summary = "No description available.";
-          }
-        } else {
-          book.summary = "No description available.";
-        }
-      }));
-
       return books;
     } catch (err) {
       console.error("Open Library search failed:", err);
@@ -130,54 +116,28 @@
           Page(perPage: 10) {
             media(search: $search, type: MANGA, sort: POPULARITY_DESC) {
               id
-              title {
-                romaji
-                english
-              }
-              coverImage {
-                large
-              }
+              title { romaji english }
+              coverImage { large }
               description
               chapters
-              volumes
-              startDate {
-                year
-              }
+              startDate { year }
               staff(perPage: 1, sort: RELEVANCE) {
-                edges {
-                  node {
-                    name {
-                      full
-                    }
-                  }
-                  role
-                }
+                edges { node { name { full } } }
               }
             }
           }
         }
       `;
-
       const anilistRes = await fetch('https://graphql.anilist.co', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          query: anilistQuery,
-          variables: { search: query }
-        })
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query: anilistQuery, variables: { search: query } })
       });
-
       if (!anilistRes.ok) return [];
-
       const anilistData = await anilistRes.json();
       const media = anilistData.data?.Page?.media ?? [];
-
-      if (!media.length) return [];
-
-      const books = media.map((manga: any) => ({
+      
+      return media.map((manga: any) => ({
         title: manga.title.english || manga.title.romaji || query,
         author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
         year: manga.startDate?.year?.toString() ?? "—",
@@ -187,16 +147,6 @@
         coverUrl: manga.coverImage?.large,
         key: null
       }));
-
-      // Preload cover images
-      books.forEach((book: any) => {
-        if (book.coverUrl) {
-          const img = new Image();
-          img.src = book.coverUrl;
-        }
-      });
-
-      return books;
     } catch (err) {
       console.error("AniList search failed:", err);
       return [];
@@ -206,25 +156,18 @@
   async function handleApiSwitch(api: "openlibrary" | "anilist") {
     if (selectedApi === api || !lastQuery) return;
     selectedApi = api;
-    
-    // Switch to stored results for this API
     const results = apiResults[api];
     if (results) {
       foundBooks = results;
     } else {
-      // If we don't have results for this API yet, search it
       isApiSwitching = true;
       try {
         let searchResults: any[] = [];
-        if (api === "openlibrary") {
-          searchResults = await searchOpenLibrary(lastQuery);
-        } else {
-          searchResults = await searchAnilist(lastQuery);
-        }
+        if (api === "openlibrary") searchResults = await searchOpenLibrary(lastQuery);
+        else searchResults = await searchAnilist(lastQuery);
         apiResults[api] = searchResults;
         foundBooks = searchResults;
       } catch (err) {
-        console.error(`Error searching ${api}:`, err);
         foundBooks = [];
       } finally {
         isApiSwitching = false;
@@ -271,7 +214,6 @@
   }
 
   // --- DATA & MODALS ---
-
   async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
     const e = event.detail;
     if (e.key !== "Enter" || !bookTitle.trim() || searchState !== "idle") return;
@@ -283,30 +225,18 @@
     apiResults = { openlibrary: null, anilist: null };
 
     try {
-      // Search both APIs in parallel
       const [openLibraryResults, anilistResults] = await Promise.all([
         searchOpenLibrary(query),
         searchAnilist(query)
       ]);
-
       apiResults.openlibrary = openLibraryResults;
       apiResults.anilist = anilistResults;
 
-      // Show results from the currently selected API, or switch to the one that has results
-      if (selectedApi === "openlibrary" && openLibraryResults.length > 0) {
-        foundBooks = openLibraryResults;
-      } else if (selectedApi === "anilist" && anilistResults.length > 0) {
-        foundBooks = anilistResults;
-      } else if (openLibraryResults.length > 0) {
-        selectedApi = "openlibrary";
-        foundBooks = openLibraryResults;
-      } else if (anilistResults.length > 0) {
-        selectedApi = "anilist";
-        foundBooks = anilistResults;
-      } else {
-        // Both APIs found nothing
-        foundBooks = [];
-      }
+      if (selectedApi === "openlibrary" && openLibraryResults.length > 0) foundBooks = openLibraryResults;
+      else if (selectedApi === "anilist" && anilistResults.length > 0) foundBooks = anilistResults;
+      else if (openLibraryResults.length > 0) { selectedApi = "openlibrary"; foundBooks = openLibraryResults; }
+      else if (anilistResults.length > 0) { selectedApi = "anilist"; foundBooks = anilistResults; }
+      else foundBooks = [];
 
       searchState = "result";
     } catch (err) {
@@ -322,14 +252,10 @@
 
   async function saveBook(event: CustomEvent) {
     const { status, pagesRead, totalPages, book } = event.detail;
-    
-    // Optimistic UI update: close modal and show success immediately
     isPulsing = true;
     setTimeout(() => isPulsing = false, 600);
     showAddDialog = false;
     pendingBook = null;
-    
-    // Reset search state after adding a book
     searchState = "idle";
     foundBooks = [];
     apiResults = { openlibrary: null, anilist: null };
@@ -345,18 +271,14 @@
         totalPages
       });
     } catch (err) {
-      console.error("Failed to save book:", err);
-      // Show error toast if save failed
       showDuplicateToast = true;
       setTimeout(() => showDuplicateToast = false, 3000);
-      // Optionally, could revert UI changes here if needed
     }
   }
 </script>
 
 <main>
   <Background />
-  <!-- Bind activeTab so sidebar clicks update state -->
   <Sidebar bind:activeTab={activeTab} />
 
   <section class="orb-stage">
@@ -366,6 +288,7 @@
       shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
       isAdding={showAddDialog}
     >
+      <!-- HOME View -->
       {#if activeTab === "home" && !isReturning}
         <div class="search-container" in:fade={{ duration: 300, delay: 200 }} out:fade={{ duration: 200 }}>
           <BookSearchModule
@@ -390,16 +313,25 @@
           />
         </div>
 
-      {:else if showLibrary}
-        <div class="library-wrapper" in:fade={{ duration: 400, delay: 1000 }} out:fade={{ duration: 200 }}>
-          <div class="library-container" class:fade-out={isReturning}>
-            <Library />
-          </div>
+      <!-- LIBRARY View -->
+      <!-- ADDED: in:fade with delay for entry. -->
+      {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
+        <div 
+          class="library-container" 
+          class:fade-out={returnStage === "fading"}
+          in:fade={{ duration: 200, delay: 900 }}
+        >
+          <Library />
         </div>
 
-      {:else if activeTab === "settings"}
-        <!-- SETTINGS VIEW -->
-        <div class="settings-wrapper" in:fade={{ duration: 400, delay: 300 }} out:fade={{ duration: 200 }}>
+      <!-- SETTINGS View -->
+      <!-- ADDED: in:fade with delay for entry. -->
+      {:else if activeTab === "settings" || (isReturning && returnStage === "fading" && previousTab === "settings")}
+        <div 
+          class="settings-container" 
+          class:fade-out={returnStage === "fading"}
+          in:fade={{ duration: 400, delay: 300 }}
+        >
            <Settings />
         </div>
       {/if}
@@ -411,7 +343,7 @@
   {/if}
 
   {#if showAddDialog && pendingBook}
-    <AddBookModal book={pendingBook} on:cancel={() => showAddDialog = false} on:save={saveBook} />
+    <AddBookDialog book={pendingBook} on:cancel={() => showAddDialog = false} on:save={saveBook} />
   {/if}
 
   {#if showDuplicateToast}
@@ -422,8 +354,19 @@
 <style>
   main { display: flex; height: 100vh; width: 100vw; position: relative; }
   .orb-stage { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; z-index: 5; }
-  .search-container, .library-wrapper, .library-container, .settings-wrapper { width: 100%; height: 100%; }
+  
+  .search-container, .library-container, .settings-container { width: 100%; height: 100%; }
   .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }
-  .library-container { transition: opacity 0.25s ease-out; }
-  .library-container.fade-out { opacity: 0; }
+  
+  /* ENTRY ANIMATION HANDLED BY SVELTE (in:fade) */
+  .library-container, .settings-container {
+    opacity: 1;
+    /* Removed transition here to avoid conflict with Svelte entry fade */
+  }
+
+  /* EXIT ANIMATION HANDLED BY CSS CLASS */
+  .library-container.fade-out, .settings-container.fade-out {
+    opacity: 0;
+    transition: opacity 0.25s ease-out; /* Only apply transition during fade out */
+  }
 </style>
