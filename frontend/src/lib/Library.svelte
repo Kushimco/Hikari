@@ -9,70 +9,89 @@
   import BookDetailModal from './library-components/BookDetailModal.svelte';
   import LibraryHeader from './library-components/LibraryHeader.svelte'; 
 
-  // -- STATE --
-  let books: Book[] = [];
-  let activeFilter = 'All';
-  let sortOption = 'Newest';
-  let searchQuery = "";
-  let selectedBook: Book | null = null;
+  /* 
+     ================================================================
+     SECTION 1: STATE MANAGEMENT
+     ================================================================
+  */
+  // {
+    let books: Book[] = [];
+    let activeFilter = 'All';
+    let sortOption = 'Newest';
+    let searchQuery = "";
+    let selectedBook: Book | null = null;
+  // }
 
-  onMount(loadBooks);
+  /* 
+     ================================================================
+     SECTION 2: COMPUTED & LIFECYCLE
+     ================================================================
+  */
+  // {
+    onMount(loadBooks);
 
-  async function loadBooks() {
-    try {
-      books = await API.getBooks();
-    } catch (err) {
-      console.error("Failed to load books:", err);
+    async function loadBooks() {
+      try {
+        books = await API.getBooks();
+      } catch (err) {
+        console.error("Failed to load books:", err);
+      }
     }
-  }
 
-  // -- DERIVED STATE --
-  $: filteredBooks = books.filter((book: Book) => {
-    const matchesStatus = activeFilter === 'All' ? true : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-');
-    const q = searchQuery.trim().toLowerCase();
-    const matchesSearch = q === "" ? true : book.title.toLowerCase().includes(q) || book.author.toLowerCase().includes(q);
-    return matchesStatus && matchesSearch;
-  });
+    // Filter Logic
+    $: filteredBooks = books.filter((book: Book) => {
+      const matchesStatus = activeFilter === 'All' ? true : book.status.toLowerCase() === activeFilter.toLowerCase().replace(' ', '-');
+      const q = searchQuery.trim().toLowerCase();
+      const matchesSearch = q === "" ? true : book.title.toLowerCase().includes(q) || book.author.toLowerCase().includes(q);
+      return matchesStatus && matchesSearch;
+    });
 
-  $: sortedBooks = [...filteredBooks].sort((a, b) => {
-    if (sortOption === 'Newest') return (new Date(b.date_added || 0).getTime()) - (new Date(a.date_added || 0).getTime());
-    if (sortOption === 'Oldest') return (new Date(a.date_added || 0).getTime()) - (new Date(b.date_added || 0).getTime());
-    if (sortOption === 'A-Z') return a.title.localeCompare(b.title);
-    return 0;
-  });
+    // Sort Logic
+    $: sortedBooks = [...filteredBooks].sort((a, b) => {
+      if (sortOption === 'Newest') return (new Date(b.date_added || 0).getTime()) - (new Date(a.date_added || 0).getTime());
+      if (sortOption === 'Oldest') return (new Date(a.date_added || 0).getTime()) - (new Date(b.date_added || 0).getTime());
+      if (sortOption === 'A-Z') return a.title.localeCompare(b.title);
+      return 0;
+    });
+  // }
 
-  // -- HANDLERS --
-  async function handleBookUpdate(event: CustomEvent<Book>) {
-    const updatedBook = event.detail;
-    books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
-    if (selectedBook && selectedBook.id === updatedBook.id) selectedBook = updatedBook;
+  /* 
+     ================================================================
+     SECTION 3: ACTION HANDLERS
+     ================================================================
+  */
+  // {
+    async function handleBookUpdate(event: CustomEvent<Book>) {
+      const updatedBook = event.detail;
+      books = books.map(b => b.id === updatedBook.id ? updatedBook : b);
+      if (selectedBook && selectedBook.id === updatedBook.id) selectedBook = updatedBook;
 
-    try {
-      if (updatedBook.pages_read !== undefined) await API.updateBookProgress(updatedBook.id, updatedBook.pages_read);
-      if (updatedBook.status) await API.updateBookStatus(updatedBook.id, updatedBook.status);
-    } catch (err) {
-      console.error("Sync failed", err);
-      loadBooks();
+      try {
+        if (updatedBook.pages_read !== undefined) await API.updateBookProgress(updatedBook.id, updatedBook.pages_read);
+        if (updatedBook.status) await API.updateBookStatus(updatedBook.id, updatedBook.status);
+      } catch (err) {
+        console.error("Sync failed", err);
+        loadBooks();
+      }
     }
-  }
 
-  async function handleBookDelete(event: CustomEvent<string>) {
-    const id = event.detail;
-    try {
-      await API.deleteBook(id);
-      books = books.filter(b => b.id !== id);
-      selectedBook = null;
-    } catch (err) {
-      console.error("Delete failed", err);
+    async function handleBookDelete(event: CustomEvent<string>) {
+      const id = event.detail;
+      try {
+        await API.deleteBook(id);
+        books = books.filter(b => b.id !== id);
+        selectedBook = null;
+      } catch (err) {
+        console.error("Delete failed", err);
+      }
     }
-  }
+  // }
 </script>
 
-<!-- Main Wrapper: Takes full height, handles positioning -->
+<!-- Main Wrapper -->
 <div class="library-wrapper">
   
-  <!-- Content Area: Scrolls independently -->
-  <!-- We add 'noscroll' class when a book is selected to lock the background -->
+  <!-- Scrollable Content Area -->
   <div class="library-scroll-area" class:noscroll={selectedBook !== null} class:blurred={selectedBook !== null}>
     
     <div class="header-container">
@@ -98,7 +117,7 @@
     </div>
   </div>
 
-  <!-- Modal: Sits OUTSIDE the scroll area, fixed to the wrapper -->
+  <!-- Detail Modal -->
   {#if selectedBook}
     <div class="modal-overlay">
       <BookDetailModal 
@@ -113,23 +132,22 @@
 </div>
 
 <style>
-  /* 1. Ensure the wrapper fills the parent and creates a positioning context */
+  /* --- LAYOUT CONTAINERS --- */
   .library-wrapper {
     position: relative;
     width: 100%;
     height: 100%;
-    overflow: hidden; /* Prevents double scrollbars */
+    overflow: hidden;
   }
 
-  /* 2. The scrollable area handles the overflowing content */
   .library-scroll-area {
     width: 100%;
     height: 100%;
-    overflow-y: auto; /* This is the ONLY thing that scrolls */
+    overflow-y: auto;
     overflow-x: hidden;
     padding-bottom: 40px;
     transition: filter 0.2s ease;
-    -ms-overflow-style: none;  /* IE and Edge */
+    -ms-overflow-style: none;
     scrollbar-width: none; 
   }
 
@@ -137,26 +155,20 @@
     display: none;
   }
   
-  /* 3. Locking scroll when modal is open */
-  .library-scroll-area.noscroll {
-    overflow: hidden;
-  }
+  /* Modal States */
+  .library-scroll-area.noscroll { overflow: hidden; }
+  .library-scroll-area.blurred { filter: blur(5px); pointer-events: none; }
 
-  .library-scroll-area.blurred {
-    filter: blur(5px);
-    pointer-events: none; /* Prevents clicking background books */
-  }
-
-  /* 4. Layout for content */
+  /* --- CONTENT STYLES --- */
   .header-container {
-    padding: 0 10px; /* Match grid padding mostly */
+    padding: 0 10px;
   }
 
   .book-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 24px;
-    padding: 0 20px; /* Added padding so cards don't touch edges */
+    padding: 0 20px;
     margin-top: 10px;
   }
 
@@ -168,15 +180,13 @@
     font-style: italic;
   }
 
-  /* 5. Modal Overlay: Fixed relative to the Wrapper (which doesn't scroll) */
+  /* --- MODAL OVERLAY --- */
   .modal-overlay {
-    position: absolute; /* Absolute to the wrapper */
-    inset: 0; /* Cover the whole area */
+    position: absolute;
+    inset: 0;
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 100; /* Ensure it's on top */
-    /* Note: Background dimming is usually handled inside BookDetailModal's backdrop, 
-       but if not, add background: rgba(0,0,0,0.5) here */
+    z-index: 100;
   }
 </style>
