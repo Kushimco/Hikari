@@ -1,16 +1,14 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { fade, scale, fly } from 'svelte/transition';
   import { cubicIn, cubicOut, elasticOut } from 'svelte/easing';
   import { invoke } from '@tauri-apps/api/core';
 
   // --- Components ---
-  // Layout Features (Using absolute alias $lib where appropriate)
   import Sidebar from '$lib/features/Sidebar.svelte';
   import Library from '$lib/features/Library.svelte';
   import Settings from '$lib/features/Settings.svelte';
   
-  // Home Components
   import Background from '$lib/home-components/Background.svelte';
   import Orb from '$lib/home-components/Orb.svelte';
   import BookSearchModule from '$lib/home-components/BookSearchModule.svelte';
@@ -69,6 +67,7 @@
   let readingGoal = 10;
   let booksFinishedCount = 0;
   let toastTimer: number | null = null;
+  let goalCheckInterval: number | null = null;
 
   // Computed Glow
   $: isGlowing =
@@ -87,9 +86,21 @@
 
   onMount(() => {
     checkGoalCompletion();
+    
+    // Polling every 1.5s to catch updates instantly on any page
+    goalCheckInterval = window.setInterval(() => {
+        checkGoalCompletion();
+    }, 1500);
+
+    window.addEventListener('hikari-update', checkGoalCompletion);
   });
 
-  // Watch for requested tab changes (Sidebar clicks)
+  onDestroy(() => {
+    if (goalCheckInterval) clearInterval(goalCheckInterval);
+    window.removeEventListener('hikari-update', checkGoalCompletion);
+  });
+
+  // Watch for requested tab changes
   $: if (requestedTab !== activeTab) {
     if (requestedTab === "home" || requestedTab === "menu") {
       checkGoalCompletion();
@@ -105,24 +116,18 @@
 
   // Watch for active tab changes (Animation logic)
   $: if (activeTab !== previousTab) {
-    // Home Bounce
     if (activeTab === "home" && !suppressHomeBounceOnce) {
       triggerBounceSequence();
     }
-
-    // Entering Settings
     if (activeTab === "settings" && previousTab !== "settings") {
       restoreOrbFloat();
       isOpeningSettings = true;
       settingsStage = "collapsing";
     }
-
-    // Leaving Settings
     if (previousTab === "settings" && activeTab !== "settings") {
       isOpeningSettings = false;
       settingsStage = "idle";
     }
-
     previousTab = activeTab;
   }
 
@@ -178,7 +183,6 @@
   async function handleSettingsReadyToExpand() {
     if (!returningFromSettings) return;
 
-    // Expand Overlay
     overlayHoldVisible = true;
     overlayGlowOff = false;
     showHomeExpandOrb = true;
@@ -191,7 +195,6 @@
     await wait(OVERLAY_EXPAND_MS);
     showHomeExpandOrb = false;
 
-    // Switch State
     suppressHomeBounceOnce = true;
     skipHomeIntroOnce = true;
     returningFromSettings = false;
@@ -201,13 +204,11 @@
 
     await tick();
 
-    // Reset flags
     suppressHomeBounceOnce = false;
     skipHomeIntroOnce = false;
     overlayGlowOff = true;
     clearTimeout(fadeTimer);
 
-    // Wait for Fade Out
     const elapsed = OVERLAY_EXPAND_MS - fadeStartAt;
     const remaining = Math.max(0, OVERLAY_FADE_MS - elapsed);
     await wait(remaining);
@@ -272,12 +273,9 @@
       const res = await fetch(`https://openlibrary.org${key}.json`);
       if (!res.ok) return "No description available.";
       const data = await res.json();
-      
-      // Robust check for string or object value
       let desc = "";
       if (typeof data.description === 'string') desc = data.description;
       else if (data.description?.value) desc = data.description.value;
-      
       return desc || "No description available.";
     } catch {
       return "Failed to load description.";
@@ -291,14 +289,11 @@
       );
       if (!res.ok) return [];
       const data = await res.json();
-      
       return (data.docs ?? []).map((doc: any) => ({
         title: doc.title ?? query,
         author: doc.author_name?.[0] ?? "Unknown author",
         year: doc.first_publish_year?.toString() ?? "—",
         pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
-        // FIX: Replaced "Click for details..." with empty string. 
-        // The card will default to "No description available." automatically if empty.
         summary: doc.first_sentence?.[0] || "",
         fullSummary: null,
         coverUrl: doc.cover_i 
@@ -336,12 +331,10 @@
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ query: queryGQL, variables: { search: query } })
       });
-
       if (!res.ok) return [];
       const data = await res.json();
-      
       return (data.data?.Page?.media ?? []).map((m: any) => {
-        let desc = m.description || ""; // Default to empty if missing
+        let desc = m.description || "";
         desc = desc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
         return {
           title: m.title.english || m.title.romaji || query,
@@ -363,18 +356,13 @@
   async function handleApiSwitch(api: "openlibrary" | "anilist") {
     if (selectedApi === api || !lastQuery) return;
     selectedApi = api;
-
     if (apiResults[api]) {
       foundBooks = apiResults[api]!;
       return;
     }
-
     isApiSwitching = true;
     try {
-      const results = api === "openlibrary" 
-        ? await searchOpenLibrary(lastQuery) 
-        : await searchAnilist(lastQuery);
-      
+      const results = api === "openlibrary" ? await searchOpenLibrary(lastQuery) : await searchAnilist(lastQuery);
       apiResults[api] = results;
       foundBooks = results;
     } catch {
@@ -387,28 +375,23 @@
   async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
     const e = event.detail;
     if (e.key !== "Enter" || !bookTitle.trim() || searchState !== "idle") return;
-
     const query = bookTitle.trim();
     bookTitle = "";
     lastQuery = query;
     searchState = "loading";
     apiResults = { openlibrary: null, anilist: null };
-
     try {
       const [olRes, alRes] = await Promise.all([
         searchOpenLibrary(query),
         searchAnilist(query)
       ]);
-
       apiResults.openlibrary = olRes;
       apiResults.anilist = alRes;
-
       if (selectedApi === "openlibrary" && olRes.length) foundBooks = olRes;
       else if (selectedApi === "anilist" && alRes.length) foundBooks = alRes;
       else if (olRes.length) { selectedApi = "openlibrary"; foundBooks = olRes; }
       else if (alRes.length) { selectedApi = "anilist"; foundBooks = alRes; }
       else foundBooks = [];
-
       searchState = "result";
     } catch (err) {
       console.error(err);
@@ -427,44 +410,30 @@
 
   async function handleOpenSummary(event: CustomEvent) {
     const book = event.detail;
-
-    // Logic for OpenLibrary (Lazy loading)
     if (book.key && !book.fullSummary) {
-      // 1. Show modal immediately with loading state
       summaryBook = { ...book, fullSummary: "Loading full description..." };
-
-      // 2. Fetch the description
       const fullDesc = await fetchOpenLibraryDescription(book.key);
-
-      // 3. Update the modal's content
       summaryBook = { ...book, fullSummary: fullDesc, summary: fullDesc };
-
-      // 4. Update the source list 'quietly'
       const foundIndex = foundBooks.findIndex(b => b.key === book.key);
       if (foundIndex !== -1) {
         foundBooks[foundIndex].fullSummary = fullDesc;
         foundBooks[foundIndex].summary = fullDesc;
       }
-    } 
-    // Logic for Anilist (Already has description)
-    else {
+    } else {
       summaryBook = book;
     }
   }
 
   async function saveBook(event: CustomEvent) {
     const { status, pagesRead, totalPages, book } = event.detail;
-
     isPulsing = true;
     setTimeout(() => (isPulsing = false), 600);
     showAddDialog = false;
     pendingBook = null;
-
     searchState = "idle";
     foundBooks = [];
     apiResults = { openlibrary: null, anilist: null };
     lastQuery = "";
-
     try {
       await invoke('add_book', {
         title: book.title,
@@ -481,24 +450,45 @@
     }
   }
 
+  // --- REFINED GOAL CHECK ---
   async function checkGoalCompletion() {
     try {
       const savedGoal = localStorage.getItem('hikari_reading_goal');
-      if (savedGoal) readingGoal = parseInt(savedGoal, 10);
+      const currentGoal = savedGoal ? parseInt(savedGoal, 10) : 10;
+      readingGoal = currentGoal;
 
+      // 1. Detect Goal Change (Settings) -> RESET
+      const lastKnownGoalStr = localStorage.getItem('hikari_last_known_goal');
+      const lastKnownGoal = lastKnownGoalStr ? parseInt(lastKnownGoalStr, 10) : null;
+      
+      if (lastKnownGoal !== currentGoal) {
+        localStorage.setItem('hikari_goal_notified_master', 'false');
+        localStorage.setItem('hikari_last_known_goal', currentGoal.toString());
+      }
+
+      // 2. Get Count
       const books: any[] = await invoke('get_books');
       booksFinishedCount = books.filter(b => b.status === 'finished').length;
 
-      const notified = localStorage.getItem('hikari_goal_notified') === 'true';
+      // 3. RE-ARM LOGIC: If we dropped BELOW the goal, reset the flag.
+      // This allows the notification to trigger again when we go back UP.
+      if (booksFinishedCount < currentGoal) {
+        localStorage.setItem('hikari_goal_notified_master', 'false');
+      }
 
-      if (booksFinishedCount >= readingGoal && booksFinishedCount > 0 && !notified) {
-        showGoalToast = true;
-        localStorage.setItem('hikari_goal_notified', 'true');
-        if (toastTimer) clearTimeout(toastTimer);
-        toastTimer = window.setTimeout(() => (showGoalToast = false), 6000);
+      // 4. Notify
+      const alreadyNotified = localStorage.getItem('hikari_goal_notified_master') === 'true';
+
+      if (booksFinishedCount >= currentGoal && booksFinishedCount > 0) {
+        if (!alreadyNotified) {
+            showGoalToast = true;
+            localStorage.setItem('hikari_goal_notified_master', 'true');
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = window.setTimeout(() => (showGoalToast = false), 6000);
+        }
       }
     } catch (err) {
-      console.error("Goal check failed", err);
+      // Silent fail during polling
     }
   }
 
@@ -509,36 +499,13 @@
   <Background />
   <Sidebar bind:activeTab={requestedTab} />
 
-  <!-- #region --- GOAL TOAST --- -->
-  {#if showGoalToast}
-    <div class="goal-toast" transition:fly={{ y: -50, x: 20, duration: 800, easing: elasticOut }}>
-      <div class="toast-icon-circle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </div>
-      <div class="toast-content">
-        <div class="toast-title">Goal Reached!</div>
-        <div class="toast-msg">You've finished {readingGoal} books.</div>
-      </div>
-      <button class="toast-close" on:click={() => (showGoalToast = false)} aria-label="Close notification">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18M6 6l12 12"/>
-        </svg>
-      </button>
-      <div class="toast-glow"></div>
-    </div>
-  {/if}
-  <!-- #endregion -->
-
   <section class="orb-stage">
-    
-    <!-- Settings Layer -->
     {#if activeTab === "settings"}
       <div class="settings-layer">
         <Settings stage={settingsStage} on:readyToExpand={handleSettingsReadyToExpand} />
       </div>
     {/if}
 
-    <!-- Main Orb Interaction -->
     {#if activeTab !== "settings"}
       <div
         class="orb-wrapper"
@@ -556,7 +523,6 @@
           shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
           isAdding={showAddDialog}
         >
-          <!-- Home: Search Module -->
           {#if activeTab === "home" && !isReturning}
             <div class="search-container" in:fade={{ duration: 260, delay: 80 }} out:fade={{ duration: 180 }}>
               <BookSearchModule
@@ -580,18 +546,15 @@
                 on:apiSwitch={(e) => handleApiSwitch(e.detail)}
               />
             </div>
-
-          <!-- Library: Fade In -->
           {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
             <div class="library-container" class:fade-out={returnStage === "fading"} in:fade={{ duration: 400, delay: 700 }}>
-              <Library />
+              <Library on:change={checkGoalCompletion} on:update={checkGoalCompletion} />
             </div>
           {/if}
         </Orb>
       </div>
     {/if}
 
-    <!-- Overlay Transition Orb -->
     {#if showHomeExpandOrb || overlayHoldVisible}
       <div
         class="orb-wrapper expand-overlay"
@@ -610,12 +573,10 @@
         />
       </div>
     {/if}
-
   </section>
 
-  <!-- Modals -->
   {#if summaryBook}
-    <SummaryModal book={summaryBook} on:close={() => (summaryBook = null)} />
+    <SummaryModal book={summaryBook} on:close={() => (summaryBook = null)} on:update={checkGoalCompletion} />
   {/if}
 
   {#if showAddDialog && pendingBook}
@@ -625,8 +586,25 @@
   {#if showDuplicateToast}
     <Toast title="Book Exists" message="This book is already in your library." />
   {/if}
-</main>
 
+  {#if showGoalToast}
+    <div class="goal-toast" transition:fly={{ y: -50, x: 20, duration: 800, easing: elasticOut }}>
+      <div class="toast-icon-circle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+      <div class="toast-content">
+        <div class="toast-title">Goal Reached!</div>
+        <div class="toast-msg">You've finished {readingGoal} books.</div>
+      </div>
+      <button class="toast-close" on:click={() => (showGoalToast = false)} aria-label="Close notification">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+      <div class="toast-glow"></div>
+    </div>
+  {/if}
+</main>
 
 <style>
   /* #region --- LAYOUT & CONTAINERS --- */
@@ -656,7 +634,8 @@
 
   /* #region --- TOAST STYLES --- */
   .goal-toast {
-    position: fixed; top: 30px; right: 30px; z-index: 20000;
+    position: fixed; top: 30px; right: 30px; 
+    z-index: 2147483647; /* Highest possible Z-Index */
     display: flex; align-items: center; gap: 12px;
     padding: 12px 18px; min-width: 280px;
     background: linear-gradient(135deg, rgba(255, 250, 245, 0.95), rgba(255, 235, 225, 0.90));
