@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import Home from './lib/Home.svelte';
+  import Home from '$lib/features/Home.svelte';
 
   const appWindow = getCurrentWindow();
 

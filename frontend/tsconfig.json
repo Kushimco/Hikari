@@ -1,5 +1,13 @@
 {
   "compilerOptions": {
+    /* --- ADDED THIS SECTION --- */
+    "baseUrl": ".",
+    "paths": {
+      "$lib/*": ["src/lib/*"],
+      "$assets/*": ["src/assets/*"]
+    },
+    /* -------------------------- */
+
     /* Base Options */
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
@@ -11,7 +19,6 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
-    /* "allowImportingTsExtensions": true,  <-- DELETE THIS LINE */
     "resolveJsonModule": true,
     "isolatedModules": true,
     "moduleDetection": "force",

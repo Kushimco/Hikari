@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
 
+  // --- Types ---
   type SearchState = "idle" | "loading" | "result";
 
   type MockBook = {
@@ -13,97 +14,99 @@
     coverUrl?: string | null;
   };
 
-  export let bookTitle = "";
-  export let searchState: SearchState = "idle";
-  export let books: MockBook[] = [];
-  export let isAdding = false;
-  export let isDiscarding = false;
-  export let selectedApi: "openlibrary" | "anilist" = "openlibrary";
-  export let isApiSwitching = false;
+  /* 
+     ================================================================
+     SECTION 1: PROPS & STATE
+     ================================================================
+  */
+  // {
+    export let bookTitle = "";
+    export let searchState: SearchState = "idle";
+    export let books: MockBook[] = [];
+    export let isAdding = false;
+    export let isDiscarding = false;
+    export let selectedApi: "openlibrary" | "anilist" = "openlibrary";
+    export let isApiSwitching = false;
 
-  const dispatch = createEventDispatcher<{
-    input: Event;
-    keydown: KeyboardEvent;
-    focus: FocusEvent;
-    blur: FocusEvent;
-    add: MockBook;
-    done: void;
-    openSummary: MockBook;
-    apiSwitch: "openlibrary" | "anilist";
-  }>();
+    const dispatch = createEventDispatcher<{
+      input: Event;
+      keydown: KeyboardEvent;
+      focus: FocusEvent;
+      blur: FocusEvent;
+      add: MockBook;
+      done: void;
+      openSummary: MockBook;
+      apiSwitch: "openlibrary" | "anilist";
+    }>();
 
-  let currentIndex = 0;
-  let direction: "next" | "prev" = "next";
-  let prevBooksRef: MockBook[] = [];
+    // Carousel State
+    let currentIndex = 0;
+    let direction: "next" | "prev" = "next";
+    let prevBooksRef: MockBook[] = [];
 
-  const DOT_COUNT = 3;
-  const dots = Array.from({ length: DOT_COUNT }, (_, i) => i);
+    const DOT_COUNT = 3;
+    const dots = Array.from({ length: DOT_COUNT }, (_, i) => i);
+  // }
 
-  // Reset index to 0 whenever a new list instance comes in
-  $: if (books !== prevBooksRef) {
-    currentIndex = 0;
-    prevBooksRef = books;
-  }
+  /* 
+     ================================================================
+     SECTION 2: COMPUTED VALUES
+     ================================================================
+  */
+  // {
+    // Reset index to 0 whenever a new list instance comes in
+    $: if (books !== prevBooksRef) {
+      currentIndex = 0;
+      prevBooksRef = books;
+    }
 
-  // Prev / next availability for fading arrows
-  $: canGoPrev = books.length > 1 && currentIndex > 0;
-  $: canGoNext = books.length > 1 && currentIndex < books.length - 1;
+    // Navigation availability
+    $: canGoPrev = books.length > 1 && currentIndex > 0;
+    $: canGoNext = books.length > 1 && currentIndex < books.length - 1;
 
-  // Dots: left = first, right = last, middle = any book in between
-  $: activeDotIndex = (() => {
-    const len = books.length;
-    if (!len) return 1;
-    if (currentIndex === 0) return 0;
-    if (currentIndex === len - 1) return 2;
-    return 1;
-  })();
+    // Dots logic: left = first, right = last, middle = any book in between
+    $: activeDotIndex = (() => {
+      const len = books.length;
+      if (!len) return 1;
+      if (currentIndex === 0) return 0;
+      if (currentIndex === len - 1) return 2;
+      return 1;
+    })();
 
-  $: currentBook = books.length ? books[currentIndex] : null;
+    $: currentBook = books.length ? books[currentIndex] : null;
+  // }
 
-  function handleInput(e: Event) {
-    dispatch("input", e);
-  }
+  /* 
+     ================================================================
+     SECTION 3: EVENT HANDLERS
+     ================================================================
+  */
+  // {
+    function handleInput(e: Event) { dispatch("input", e); }
+    function handleKeydown(e: KeyboardEvent) { dispatch("keydown", e); }
+    function handleFocus(e: FocusEvent) { dispatch("focus", e); }
+    function handleBlur(e: FocusEvent) { dispatch("blur", e); }
+    
+    function handleAdd(book: MockBook) { dispatch("add", book); }
+    function handleOpenSummary(book: MockBook) { dispatch("openSummary", book); }
+    function handleApiSwitch(api: "openlibrary" | "anilist") { dispatch("apiSwitch", api); }
+    function handleDone() { dispatch("done"); }
 
-  function handleKeydown(e: KeyboardEvent) {
-    dispatch("keydown", e);
-  }
+    function goNext() {
+      if (!books.length || !canGoNext) return;
+      direction = "next";
+      currentIndex = currentIndex + 1;
+    }
 
-  function handleFocus(e: FocusEvent) {
-    dispatch("focus", e);
-  }
-
-  function handleBlur(e: FocusEvent) {
-    dispatch("blur", e);
-  }
-
-  function handleAdd(book: MockBook) {
-    dispatch("add", book);
-  }
-
-  function handleOpenSummary(book: MockBook) {
-    dispatch("openSummary", book);
-  }
-
-  function handleApiSwitch(api: "openlibrary" | "anilist") {
-    dispatch("apiSwitch", api);
-  }
-
-  function handleDone() {
-    dispatch("done");
-  }
-
-  function goNext() {
-    if (!books.length || !canGoNext) return;
-    direction = "next";
-    currentIndex = currentIndex + 1;
-  }
-
-  function goPrev() {
-    if (!books.length || !canGoPrev) return;
-    direction = "prev";
-    currentIndex = currentIndex - 1;
-  }
+    function goPrev() {
+      if (!books.length || !canGoPrev) return;
+      direction = "prev";
+      currentIndex = currentIndex - 1;
+    }
+  // }
 </script>
+
+<!-- MARKUP -->
 
 {#if searchState === "result"}
   <!-- API Selector Bubbles -->
@@ -130,96 +133,102 @@
 
   {#if currentBook}
     <div class="carousel-shell" class:api-switching={isApiSwitching}>
-    <div class="carousel-row">
-      <button
-        type="button"
-        class="nav-bubble nav-bubble-left"
-        class:nav-hidden={!canGoPrev}
-        on:click={goPrev}
-        aria-label="Previous result"
-        disabled={!canGoPrev}
-      >
-        ‹
-      </button>
-
-      {#key currentBook.title + currentIndex}
-        <div
-          class="book-card-wrapper"
-          class:slide-next={direction === "next"}
-          class:slide-prev={direction === "prev"}
+      <div class="carousel-row">
+        <!-- Prev Button -->
+        <button
+          type="button"
+          class="nav-bubble nav-bubble-left"
+          class:nav-hidden={!canGoPrev}
+          on:click={goPrev}
+          aria-label="Previous result"
+          disabled={!canGoPrev}
         >
+          ‹
+        </button>
+
+        <!-- Book Card (Keyed for slide animation) -->
+        {#key currentBook.title + currentIndex}
           <div
-            class="book-card"
-            class:book-card-adding={isAdding}
-            class:book-card-discarding={isDiscarding}
+            class="book-card-wrapper"
+            class:slide-next={direction === "next"}
+            class:slide-prev={direction === "prev"}
           >
-            <div class="book-cover">
-              {#if currentBook.coverUrl}
-                <img
-                  src={currentBook.coverUrl}
-                  alt={`Cover of ${currentBook.title}`}
-                  loading="lazy"
-                />
-              {/if}
+            <div
+              class="book-card"
+              class:book-card-adding={isAdding}
+              class:book-card-discarding={isDiscarding}
+            >
+              <div class="book-cover">
+                {#if currentBook.coverUrl}
+                  <img
+                    src={currentBook.coverUrl}
+                    alt={`Cover of ${currentBook.title}`}
+                    loading="lazy"
+                  />
+                {/if}
+              </div>
+              <div class="book-info">
+                <h2>{currentBook.title}</h2>
+                <p class="book-meta">
+                  {currentBook.author} · {currentBook.year}
+                </p>
+                <p class="book-pages-count">
+                  {currentBook.pages} pages
+                </p>
+                <button
+                  type="button"
+                  class="book-summary-button"
+                  on:click={() => handleOpenSummary(currentBook)}
+                  aria-label={`Read full description of ${currentBook.title}`}
+                >
+                  {currentBook.summary || 'No description available.'}
+                </button>
+              </div>
             </div>
-            <div class="book-info">
-              <h2>{currentBook.title}</h2>
-              <p class="book-meta">
-                {currentBook.author} · {currentBook.year} · {currentBook.pages} pages
-              </p>
-              <button
-                type="button"
-                class="book-summary-button"
-                on:click={() => handleOpenSummary(currentBook)}
-                aria-label={`Read full description of ${currentBook.title}`}
-              >
-                {currentBook.summary}
-              </button>
+
+            <div class="dot-row">
+              {#each dots as i}
+                <span
+                  class="dot"
+                  class:dot-active={i === activeDotIndex}
+                ></span>
+              {/each}
             </div>
           </div>
+        {/key}
 
-          <div class="dot-row">
-            {#each dots as i}
-              <span
-                class="dot"
-                class:dot-active={i === activeDotIndex}
-              ></span>
-            {/each}
-          </div>
-        </div>
-      {/key}
+        <!-- Next Button -->
+        <button
+          type="button"
+          class="nav-bubble nav-bubble-right"
+          class:nav-hidden={!canGoNext}
+          on:click={goNext}
+          aria-label="Next result"
+          disabled={!canGoNext}
+        >
+          ›
+        </button>
+      </div>
 
-      <button
-        type="button"
-        class="nav-bubble nav-bubble-right"
-        class:nav-hidden={!canGoNext}
-        on:click={goNext}
-        aria-label="Next result"
-        disabled={!canGoNext}
-      >
-        ›
-      </button>
+      <div class="carousel-footer">
+        <button
+          type="button"
+          class="pill-btn pill-done"
+          on:click={handleDone}
+        >
+          Done
+        </button>
+        <button
+          type="button"
+          class="pill-btn pill-add"
+          on:click={() => handleAdd(currentBook)}
+        >
+          Add
+        </button>
+      </div>
     </div>
-
-    <div class="carousel-footer">
-      <button
-        type="button"
-        class="pill-btn pill-done"
-        on:click={handleDone}
-      >
-        Done
-      </button>
-      <button
-        type="button"
-        class="pill-btn pill-add"
-        on:click={() => handleAdd(currentBook)}
-      >
-        Add
-      </button>
-    </div>
-  </div>
   {:else}
-    <!-- No results found -->
+    <!-- No Results State -->
     <div class="no-results-container">
       <div class="no-results-message">
         <h3>No results found</h3>
@@ -236,7 +245,9 @@
       </div>
     </div>
   {/if}
+
 {:else}
+  <!-- Idle / Loading State -->
   <div
     class="glass-capsule"
     class:fade-in-delayed={searchState === "idle"}
@@ -260,27 +271,19 @@
 
 
 <style>
+  /* #region --- API SELECTOR --- */
   .api-selector {
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-    margin-bottom: 20px;
-    padding: 0 20px;
+    display: flex; justify-content: center; gap: 12px;
+    margin-bottom: 20px; padding: 0 20px;
   }
 
   .api-bubble {
     background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 20px;
-    padding: 8px 16px;
-    /* CHANGED: Matches the #5b3b30 color of the 'Done/Add' buttons */
-    color: #5b3b30;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s ease;
+    border-radius: 20px; padding: 8px 16px;
+    color: #5b3b30; font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: all 0.3s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 
@@ -292,407 +295,201 @@
 
   .api-bubble.active {
     background: rgba(255, 255, 255, 0.4);
-    /* CHANGED: Ensure active state keeps the dark brown color */
     color: #5b3b30;
     border-color: rgba(255, 255, 255, 0.5);
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
   }
+  /* #endregion */
 
-  .no-results-container {
-    width: 420px;
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-    text-align: center;
-  }
-
-  .no-results-message {
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .no-results-message h3 {
-    margin: 0 0 8px 0;
-    font-size: 18px;
-    font-weight: 600;
-  }
-
-  .no-results-message p {
-    margin: 0;
-    font-size: 14px;
-    opacity: 0.7;
-  }
-
+  /* #region --- CAROUSEL & CARDS --- */
   .carousel-shell {
-    width: 420px;
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    align-items: center;
-    justify-content: center;
+    width: 420px; max-width: 90vw; /* Strict container width */
+    display: flex; flex-direction: column; gap: 14px; 
+    align-items: center; justify-content: center;
     transition: opacity 0.3s ease;
   }
-
-  .carousel-shell.api-switching {
-    opacity: 0.3;
-    pointer-events: none;
-  }
+  .carousel-shell.api-switching { opacity: 0.3; pointer-events: none; }
 
   .carousel-row {
-    width: 100%;
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    column-gap: 10px;
+    width: 100%; display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; column-gap: 10px;
   }
 
-  .book-card-wrapper {
-    position: relative;
-  }
-
-  .nav-bubble {
-    width: 40px;
-    height: 40px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.2);
-    color: #5b3b30;
-    font-size: 1.4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    cursor: pointer;
-    box-shadow: 0 10px 25px rgba(181, 119, 83, 0.25);
-    transition:
-      opacity 0.18s ease,
-      background 0.2s ease,
-      transform 0.15s ease,
-      box-shadow 0.2s ease;
-    opacity: 1;
-  }
-
-  .nav-bubble:hover:not(.nav-hidden) {
-    background: rgba(255, 255, 255, 0.32);
-    transform: translateY(-1px);
-  }
-
-  .nav-hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .nav-bubble-left {
-    justify-self: flex-start;
-  }
-
-  .nav-bubble-right {
-    justify-self: flex-end;
-  }
+  /* CRITICAL FIX: min-width: 0 ensures flex child shrinks */
+  .book-card-wrapper { position: relative; width: 100%; min-width: 0; } 
 
   .book-card {
-    display: flex;
-    gap: 20px;
-    align-items: center;
+    display: flex; gap: 16px; align-items: center;
     background: rgba(255, 255, 255, 0.3);
-    border-radius: 24px;
-    padding: 22px 24px;
+    border-radius: 20px; padding: 16px 20px;
     border: 1px solid rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06);
+    height: 140px; 
+    width: 100%; /* Ensure it fits wrapper */
+    box-sizing: border-box; 
+    overflow: hidden; /* Prevent spillover */
   }
 
-  .book-card-adding {
-    animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards;
-  }
-
-  .book-card-discarding {
-    animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards;
-  }
+  .book-card-adding { animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards; }
+  .book-card-discarding { animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards; }
 
   .book-cover {
-    width: 96px;
-    min-width: 96px;
-    height: 128px;
-    border-radius: 18px;
-    background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
-    box-shadow:
-      0 10px 25px rgba(181, 119, 83, 0.35),
-      inset 0 0 12px rgba(255, 255, 255, 0.7);
-    overflow: hidden;
-    flex-shrink: 0;
-    display: flex;
-    align-items: stretch;
-    justify-content: center;
+    width: 80px; min-width: 80px; height: 108px;
+    border-radius: 12px; background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
+    box-shadow: 0 8px 20px rgba(181, 119, 83, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.7);
+    overflow: hidden; flex-shrink: 0;
+    display: flex; align-items: stretch; justify-content: center;
+  }
+  .book-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* CRITICAL FIX: min-width: 0 here is required for truncation to work in flex */
+  .book-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; justify-content: center; }
+  
+  .book-info h2 { 
+    margin: 0; font-size: 1rem; font-weight: 700; color: #4b332e; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+    max-width: 100%; /* Force truncation */
+  }
+  
+  .book-meta { margin: 0; font-size: 0.85rem; color: rgba(75, 51, 46, 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  
+  .book-pages-count {
+    margin: 0; font-size: 0.8rem; font-weight: 600; color: rgba(91, 59, 48, 0.6);
   }
 
-  .book-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
-  .book-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .book-info h2 {
-    margin: 0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #4b332e;
-    text-align: left;
-  }
-
-  .book-meta {
-    margin: 0;
-    font-size: 0.85rem;
-    color: rgba(75, 51, 46, 0.7);
-  }
-
+  /* --- TRUNCATED SUMMARY --- */
   .book-summary-button {
-    margin: 6px 0 0;
-    padding: 0;
-    border: none;
-    background: none;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    font-size: 0.92rem;
-    line-height: 1.4;
-    color: rgba(75, 51, 46, 0.8);
+    margin: 6px 0 0; padding: 0; border: none; background: none; font: inherit; text-align: left;
+    cursor: pointer; font-size: 0.85rem; line-height: 1.35; color: rgba(75, 51, 46, 0.8);
+    
+    /* Clamp to exactly 2 lines & Add Ellipsis */
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;
     overflow: hidden;
+    text-overflow: ellipsis;
+    
+    height: 2.7em; 
+    width: 100%;
   }
+  .book-summary-button:hover, .book-summary-button:focus-visible { color: rgba(75, 51, 46, 0.95); outline: none; }
+  /* #endregion */
 
-  .book-summary-button:hover,
-  .book-summary-button:focus-visible {
-    color: rgba(75, 51, 46, 0.95);
-    outline: none;
+  /* #region --- NAVIGATION & CONTROLS --- */
+  .nav-bubble {
+    width: 36px; height: 36px; border-radius: 999px; 
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.2); color: #5b3b30;
+    font-size: 1.2rem; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    cursor: pointer; box-shadow: 0 8px 20px rgba(181, 119, 83, 0.2);
+    transition: opacity 0.18s ease, background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    opacity: 1; flex-shrink: 0;
   }
+  .nav-bubble:hover:not(.nav-hidden) { background: rgba(255, 255, 255, 0.32); transform: translateY(-1px); }
+  .nav-hidden { opacity: 0; pointer-events: none; }
+  .nav-bubble-left { justify-self: flex-start; }
+  .nav-bubble-right { justify-self: flex-end; }
 
-  .dot-row {
-    display: flex;
-    justify-content: center;
-    gap: 6px;
-    margin-top: 10px;
-  }
+  .dot-row { display: flex; justify-content: center; gap: 6px; margin-top: 8px; }
+  .dot { width: 5px; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.5); }
+  .dot-active { background: rgba(181, 119, 83, 0.95); box-shadow: 0 0 10px rgba(181, 119, 83, 0.7); }
 
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.5);
-  }
-
-  .dot-active {
-    background: rgba(181, 119, 83, 0.95);
-    box-shadow: 0 0 10px rgba(181, 119, 83, 0.7);
-  }
-
-  .carousel-footer {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-  }
+  .carousel-footer { display: flex; gap: 12px; justify-content: center; }
 
   .pill-btn {
-    min-width: 110px;
-    padding: 9px 22px;
-    border-radius: 999px;
+    min-width: 100px; padding: 8px 20px; border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.22);
-    color: #5b3b30;
-    font-size: 0.9rem;
-    font-weight: 500;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    cursor: pointer;
-    transition:
-      background 0.2s ease,
-      transform 0.15s ease,
-      box-shadow 0.2s ease;
+    background: rgba(255, 255, 255, 0.22); color: #5b3b30;
+    font-size: 0.85rem; font-weight: 500;
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    cursor: pointer; transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
   }
-
   .pill-btn:hover {
-    background: rgba(255, 255, 255, 0.35);
-    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.35); transform: translateY(-1px);
     box-shadow: 0 10px 25px rgba(181, 119, 83, 0.25);
   }
+  .pill-add { border-color: rgba(255, 255, 255, 0.9); }
+  .pill-done { border-color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.16); }
+  /* #endregion */
 
-  .pill-add {
-    border-color: rgba(255, 255, 255, 0.9);
-  }
-
-  .pill-done {
-    border-color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.16);
-  }
-
-  .slide-next {
-    animation: slideNext 0.25s ease-out;
-  }
-
-  .slide-prev {
-    animation: slidePrev 0.25s ease-out;
-  }
-
-  @keyframes slideNext {
-    from {
-      opacity: 0;
-      transform: translateX(12px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  @keyframes slidePrev {
-    from {
-      opacity: 0;
-      transform: translateX(-12px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  @keyframes resultAddOut {
-    0% {
-      opacity: 1;
-      transform: scale(1) translateY(0);
-    }
-    45% {
-      opacity: 1;
-      transform: scale(1.03) translateY(-2px);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(0.92) translateY(-8px);
-    }
-  }
-
-  @keyframes resultDiscardOut {
-    0% {
-      opacity: 1;
-      transform: scale(1) translateY(0) rotate(0deg);
-      filter: blur(0px);
-    }
-    35% {
-      opacity: 1;
-      transform: scale(0.98) translateY(4px) rotate(-1.5deg);
-      filter: blur(0px);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(0.9) translateY(18px) rotate(-3deg);
-      filter: blur(2px);
-    }
-  }
-
+  /* #region --- INPUT CAPSULE --- */
   .glass-capsule {
     background: rgba(255, 255, 255, 0.3);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    padding: 18px 36px;
-    border-radius: 100px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    padding: 16px 32px; border-radius: 100px;
     border: 1px solid rgba(255, 255, 255, 0.5);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
-    width: 340px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition:
-      width 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      height 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      padding 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      border-radius 0.35s cubic-bezier(0.25, 1, 0.5, 1),
-      box-shadow 0.35s ease,
-      background 0.35s ease;
+    width: 320px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
   }
-
-  .glass-capsule.fade-in-delayed {
-    animation: fadeIn 0.8s ease forwards;
-    opacity: 0;
-  }
-
+  .glass-capsule.fade-in-delayed { animation: fadeIn 0.8s ease forwards; opacity: 0; }
   .glass-capsule-loading {
-    width: 72px;
-    height: 72px;
-    padding: 0;
-    border-radius: 999px;
+    width: 64px; height: 64px; padding: 0; border-radius: 999px;
     box-shadow: 0 14px 36px rgba(181, 119, 83, 0.35);
     background: rgba(255, 255, 255, 0.45);
   }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
   .glass-capsule:focus-within {
-    transform: scale(1.03);
-    background: rgba(255, 255, 255, 0.45);
+    transform: scale(1.03); background: rgba(255, 255, 255, 0.45);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
   }
 
-  .loading-circle {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    border: 3px solid rgba(255, 255, 255, 0.6);
-    border-top-color: rgba(205, 132, 94, 1);
-    box-shadow: 0 0 24px rgba(205, 132, 94, 0.4);
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   input {
-    width: 100%;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-size: 1.2rem;
-    color: #5e4b4b;
-    text-align: center;
-    font-weight: 500;
-    font-family: "Inter", sans-serif;
+    width: 100%; background: transparent; border: none; outline: none;
+    font-size: 1.1rem; color: #5e4b4b; text-align: center;
+    font-weight: 500; font-family: "Inter", sans-serif;
+  }
+  input::placeholder { color: rgba(94, 75, 75, 0.45); font-weight: 400; transition: opacity 0.15s ease-out; }
+  input:focus::placeholder { opacity: 0; }
+  
+  .loading-circle {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.6); border-top-color: rgba(205, 132, 94, 1);
+    box-shadow: 0 0 24px rgba(205, 132, 94, 0.4); animation: spin 0.9s linear infinite;
+  }
+  /* #endregion */
+
+  /* #region --- ANIMATIONS --- */
+  .slide-next { animation: slideNext 0.25s ease-out; }
+  .slide-prev { animation: slidePrev 0.25s ease-out; }
+
+  @keyframes slideNext {
+    from { opacity: 0; transform: translateX(12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes slidePrev {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
   }
 
-  input::placeholder {
-    color: rgba(94, 75, 75, 0.45);
-    font-weight: 400;
-    transition: opacity 0.15s ease-out;
+  @keyframes resultAddOut {
+    0% { opacity: 1; transform: scale(1) translateY(0); }
+    45% { opacity: 1; transform: scale(1.03) translateY(-2px); }
+    100% { opacity: 0; transform: scale(0.92) translateY(-8px); }
   }
 
-  input:focus::placeholder {
-    opacity: 0;
+  @keyframes resultDiscardOut {
+    0% { opacity: 1; transform: scale(1) translateY(0) rotate(0deg); filter: blur(0px); }
+    35% { opacity: 1; transform: scale(0.98) translateY(4px) rotate(-1.5deg); filter: blur(0px); }
+    100% { opacity: 0; transform: scale(0.9) translateY(18px) rotate(-3deg); filter: blur(2px); }
   }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  
+  .no-results-container {
+    width: 420px; max-width: 100%; display: flex; flex-direction: column;
+    gap: 18px; align-items: center; justify-content: center;
+    padding: 40px 20px; text-align: center;
+  }
+  .no-results-message { color: rgba(255, 255, 255, 0.8); }
+  .no-results-message h3 { margin: 0 0 8px 0; font-size: 18px; font-weight: 600; }
+  .no-results-message p { margin: 0; font-size: 14px; opacity: 0.7; }
+  /* #endregion */
 </style>

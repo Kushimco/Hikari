@@ -63,7 +63,7 @@
       status: statusInput,
       pagesRead: parseInt(pagesReadInput || "0"),
       totalPages: parseInt(totalPagesInput || "0"),
-      book // Pass back the original book data for reference
+      book 
     });
   }
 </script>
