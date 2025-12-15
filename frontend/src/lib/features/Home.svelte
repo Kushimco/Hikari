@@ -8,12 +8,12 @@
   import Sidebar from './Sidebar.svelte';
   import Library from './Library.svelte';
   import Settings from './Settings.svelte';
-  import Background from './home-components/Background.svelte';
-  import Orb from './home-components/Orb.svelte';
-  import BookSearchModule from './home-components/BookSearchModule.svelte';
-  import AddBookDialog from './home-components/AddBookModal.svelte';
-  import SummaryModal from './home-components/SummaryModal.svelte';
-  import Toast from './home-components/Toast.svelte';
+  import Background from '$lib/home-components/Background.svelte';
+  import Orb from '$lib/home-components/Orb.svelte';
+  import BookSearchModule from '$lib/home-components/BookSearchModule.svelte';
+  import AddBookDialog from '$lib/home-components/AddBookModal.svelte';
+  import SummaryModal from '$lib/home-components/SummaryModal.svelte';
+  import Toast from '$lib/home-components/Toast.svelte';  
 
   // #region --- STATE MANAGEMENT ---
   

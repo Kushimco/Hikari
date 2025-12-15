@@ -3,11 +3,11 @@
   import { flip } from 'svelte/animate';
   
   // Imports
-  import * as API from './library-components/api';
-  import type { Book } from './library-components/api';
-  import BookCard from './library-components/BookCard.svelte';
-  import BookDetailModal from './library-components/BookDetailModal.svelte';
-  import LibraryHeader from './library-components/LibraryHeader.svelte'; 
+  import * as API from '$lib/library-components/api';
+  import type { Book } from '$lib/library-components/api';
+  import BookCard from '$lib/library-components/BookCard.svelte';
+  import BookDetailModal from '$lib/library-components/BookDetailModal.svelte';
+  import LibraryHeader from '$lib/library-components/LibraryHeader.svelte'; 
 
   /* 
      ================================================================

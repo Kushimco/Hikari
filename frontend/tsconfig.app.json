@@ -1,5 +1,13 @@
 {
   "compilerOptions": {
+    /* --- ADD THIS: Base URL & Paths --- */
+    "baseUrl": ".",
+    "paths": {
+      "$lib/*": ["src/lib/*"],
+      "$assets/*": ["src/assets/*"]
+    },
+    /* ---------------------------------- */
+
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "ES2020",
