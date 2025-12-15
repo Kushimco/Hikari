@@ -1,8 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { fade, scale } from 'svelte/transition';
-  import { cubicIn, cubicOut } from 'svelte/easing';
-  import { tick } from 'svelte';
+  import { fade, scale, fly } from 'svelte/transition';
+  import { cubicIn, cubicOut, elasticOut } from 'svelte/easing';
+  import { tick, onMount } from 'svelte';
 
   // Components
   import Sidebar from './Sidebar.svelte';
@@ -40,10 +40,8 @@
 
   // --- Overlay timing (MUST match CSS durations below) ---
   const overlayExpandMs = 650;
-
   // Total fade duration (match .expand-overlay transition)
   const overlayFadeMs = 900;
-
   // Start fading this much BEFORE expand ends (so it begins disappearing sooner)
   const overlayFadeLeadMs = 250;
 
@@ -73,6 +71,12 @@
   let summaryBook: any | null = null;
   let orbElement: HTMLDivElement | null = null;
 
+  // --- GOAL TOAST STATE ---
+  let showGoalToast = false;
+  let readingGoal = 10;
+  let booksFinishedCount = 0;
+  let toastTimer: number | null = null;
+
   // Keep glow while collapsing + while overlay is visible
   $: isGlowing =
     (isReturning && returnStage !== "idle") ||
@@ -88,8 +92,48 @@
     return new Promise<void>((r) => setTimeout(r, ms));
   }
 
+  // --- GOAL CHECKER LOGIC ---
+  async function checkGoalCompletion() {
+    try {
+        const savedGoal = localStorage.getItem('hikari_reading_goal');
+        if (savedGoal) readingGoal = parseInt(savedGoal, 10);
+
+        const books: any[] = await invoke('get_books');
+        booksFinishedCount = books.filter(b => b.status === 'finished').length;
+
+        const alreadyNotified = localStorage.getItem('hikari_goal_notified') === 'true';
+
+        if (booksFinishedCount >= readingGoal && booksFinishedCount > 0) {
+            if (!alreadyNotified) {
+                showGoalToast = true;
+                localStorage.setItem('hikari_goal_notified', 'true');
+                if (toastTimer) clearTimeout(toastTimer);
+                toastTimer = window.setTimeout(() => {
+                    showGoalToast = false;
+                }, 6000);
+            }
+        }
+    } catch (err) {
+        console.error("Goal check failed", err);
+    }
+  }
+
+  function closeGoalToast() {
+    showGoalToast = false;
+    if (toastTimer) clearTimeout(toastTimer);
+  }
+
+  onMount(() => {
+    checkGoalCompletion();
+  });
+
   // Intercept requested tab changes to allow animations
   $: if (requestedTab !== activeTab) {
+    // Check goal when switching back to home or library
+    if (requestedTab === "home" || requestedTab === "menu") {
+         checkGoalCompletion();
+    }
+
     // SETTINGS -> HOME (play gathering first)
     if (activeTab === "settings" && requestedTab === "home" && !returningFromSettings) {
       returningFromSettings = true;
@@ -185,7 +229,6 @@
     skipHomeIntroOnce = false;
 
     // Ensure fade definitely started (in case timings were changed)
-    // (If it already started, setting true again is harmless.)
     overlayGlowOff = true;
     clearTimeout(fadeTimer);
 
@@ -419,6 +462,8 @@
         pagesRead,
         totalPages
       });
+      // Re-check goal after adding a book
+      checkGoalCompletion();
     } catch (err) {
       showDuplicateToast = true;
       setTimeout(() => (showDuplicateToast = false), 3000);
@@ -429,6 +474,23 @@
 <main>
   <Background />
   <Sidebar bind:activeTab={requestedTab} />
+
+  <!-- GLOBAL GOAL TOAST (Right Positioned) -->
+  {#if showGoalToast}
+    <div class="goal-toast" transition:fly={{ y: -50, x: 20, duration: 800, easing: elasticOut }}>
+        <div class="toast-icon-circle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <div class="toast-content">
+            <div class="toast-title">Goal Reached!</div>
+            <div class="toast-msg">You've finished {readingGoal} books.</div>
+        </div>
+        <button class="toast-close" on:click={closeGoalToast} aria-label="Close notification">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="toast-glow"></div>
+    </div>
+  {/if}
 
   <section class="orb-stage">
     <!-- SETTINGS stays mounted while gathering/expanding back -->
@@ -559,4 +621,59 @@
 
   .library-container { opacity: 1; }
   .library-container.fade-out { opacity: 0; transition: opacity 0.25s ease-out; }
+
+  /* --- GLOBAL TOAST --- */
+  .goal-toast {
+    position: fixed;
+    top: 30px; 
+    right: 30px; 
+    z-index: 20000;
+    
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px;
+    min-width: 280px;
+    
+    background: linear-gradient(135deg, rgba(255, 250, 245, 0.95), rgba(255, 235, 225, 0.90));
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 
+        0 10px 40px rgba(94, 75, 75, 0.15), 
+        0 4px 12px rgba(0,0,0,0.05),
+        inset 0 0 0 1px rgba(255,255,255,0.4);
+    
+    border-radius: 20px;
+    color: #5e4b4b;
+    backdrop-filter: blur(12px);
+    pointer-events: auto;
+  }
+
+  .toast-icon-circle {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, #a7e8bd, #76c690);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(134, 214, 160, 0.4);
+    flex-shrink: 0;
+  }
+  .toast-icon-circle svg { width: 18px; height: 18px; }
+
+  .toast-content { flex: 1; }
+  .toast-title { font-weight: 800; font-size: 0.9rem; letter-spacing: 0.01em; margin-bottom: 2px; }
+  .toast-msg { font-size: 0.8rem; opacity: 0.7; font-weight: 500; }
+
+  .toast-close {
+    background: transparent; border: none; cursor: pointer;
+    padding: 6px; border-radius: 50%;
+    color: #5e4b4b; opacity: 0.4;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .toast-close:hover { opacity: 1; background: rgba(94, 75, 75, 0.08); transform: rotate(90deg); }
+  .toast-close svg { width: 16px; height: 16px; }
+
+  .toast-glow {
+    position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    border-radius: 20px;
+    background: radial-gradient(circle at 10% 50%, rgba(167, 232, 189, 0.15), transparent 50%);
+  }
 </style>
