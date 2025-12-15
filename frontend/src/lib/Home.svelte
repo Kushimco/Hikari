@@ -287,10 +287,27 @@
   }
 
   // --- API FUNCTIONS ---
+  
+  // Helper to fetch full description from OpenLibrary when a book is selected
+  async function fetchOpenLibraryDescription(key: string): Promise<string> {
+      try {
+          const res = await fetch(`https://openlibrary.org${key}.json`);
+          if (!res.ok) return "No description available.";
+          const data = await res.json();
+          // OL descriptions can be strings or objects: { type: 'text', value: '...' }
+          if (typeof data.description === 'string') return data.description;
+          if (data.description?.value) return data.description.value;
+          return "No description available.";
+      } catch {
+          return "Failed to load description.";
+      }
+  }
+
   async function searchOpenLibrary(query: string): Promise<any[]> {
     try {
+      // Added 'first_sentence' to fields for better immediate context
       const res = await fetch(
-        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn,first_sentence`
       );
       if (!res.ok) return [];
       const data: any = await res.json();
@@ -302,24 +319,23 @@
         if (doc.cover_i) coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
         else if (doc.isbn?.[0]) coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg`;
 
+        // Use first_sentence as a preview if available
+        const preview = doc.first_sentence?.[0] || "Click for details...";
+
         return {
           title: doc.title ?? query,
           author: doc.author_name?.[0] ?? "Unknown author",
           year: doc.first_publish_year?.toString() ?? "—",
           pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
-          summary: "Loading description...",
-          fullSummary: null,
+          summary: preview,
+          fullSummary: null, // Will be fetched on demand
           coverUrl,
           key: doc.key
         };
       });
 
-      books.forEach((book: any) => {
-        if (book.coverUrl) {
-          const img = new Image();
-          img.src = book.coverUrl;
-        }
-      });
+      // Removed the aggressive image pre-loading loop here
+      // This prevents network congestion and makes results appear faster
 
       return books;
     } catch (err) {
@@ -358,18 +374,22 @@
       const anilistData = await anilistRes.json();
       const media = anilistData.data?.Page?.media ?? [];
 
-      return media.map((manga: any) => ({
-        title: manga.title.english || manga.title.romaji || query,
-        author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
-        year: manga.startDate?.year?.toString() ?? "—",
-        pages: (manga.chapters || 0).toString(),
-        summary: manga.description
-          ? (manga.description.length > 200 ? manga.description.substring(0, 200) + "..." : manga.description)
-          : "No description available.",
-        fullSummary: manga.description,
-        coverUrl: manga.coverImage?.large,
-        key: null
-      }));
+      return media.map((manga: any) => {
+        // Strip HTML tags from AniList description
+        let cleanDesc = manga.description || "No description available.";
+        cleanDesc = cleanDesc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        
+        return {
+            title: manga.title.english || manga.title.romaji || query,
+            author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
+            year: manga.startDate?.year?.toString() ?? "—",
+            pages: (manga.chapters || 0).toString(),
+            summary: cleanDesc.length > 200 ? cleanDesc.substring(0, 200) + "..." : cleanDesc,
+            fullSummary: cleanDesc,
+            coverUrl: manga.coverImage?.large,
+            key: null
+        };
+      });
     } catch (err) {
       console.error("AniList search failed:", err);
       return [];
@@ -437,6 +457,29 @@
   function handleAddRequest(event: CustomEvent) {
     pendingBook = event.detail;
     showAddDialog = true;
+  }
+
+  // Handler for opening the Summary Modal
+  // This now checks if we need to fetch a full description
+  async function handleOpenSummary(event: CustomEvent) {
+      let book = event.detail;
+      
+      // If it's an OpenLibrary book (has a key) and we don't have the full summary yet
+      if (book.key && !book.fullSummary) {
+          // Show modal immediately with what we have
+          summaryBook = { ...book, fullSummary: "Loading full description..." };
+          
+          // Fetch description in background
+          const fullDesc = await fetchOpenLibraryDescription(book.key);
+          
+          // Update the modal
+          summaryBook = { ...book, fullSummary: fullDesc, summary: fullDesc };
+          
+          // Also update the book in the search results list so we don't fetch again
+          foundBooks = foundBooks.map(b => b.key === book.key ? { ...b, fullSummary: fullDesc, summary: fullDesc } : b);
+      } else {
+          summaryBook = book;
+      }
   }
 
   async function saveBook(event: CustomEvent) {
@@ -534,7 +577,7 @@
                 on:focus={handleFocus}
                 on:blur={handleBlur}
                 on:add={handleAddRequest}
-                on:openSummary={(e) => (summaryBook = e.detail)}
+                on:openSummary={handleOpenSummary}
                 on:done={() => {
                   searchState = "idle";
                   foundBooks = [];
