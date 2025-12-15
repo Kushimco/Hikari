@@ -5,9 +5,12 @@
   import { invoke } from '@tauri-apps/api/core';
 
   // --- Components ---
-  import Sidebar from './Sidebar.svelte';
-  import Library from './Library.svelte';
-  import Settings from './Settings.svelte';
+  // Layout Features (Using absolute alias $lib where appropriate)
+  import Sidebar from '$lib/features/Sidebar.svelte';
+  import Library from '$lib/features/Library.svelte';
+  import Settings from '$lib/features/Settings.svelte';
+  
+  // Home Components
   import Background from '$lib/home-components/Background.svelte';
   import Orb from '$lib/home-components/Orb.svelte';
   import BookSearchModule from '$lib/home-components/BookSearchModule.svelte';
@@ -269,9 +272,13 @@
       const res = await fetch(`https://openlibrary.org${key}.json`);
       if (!res.ok) return "No description available.";
       const data = await res.json();
-      if (typeof data.description === 'string') return data.description;
-      if (data.description?.value) return data.description.value;
-      return "No description available.";
+      
+      // Robust check for string or object value
+      let desc = "";
+      if (typeof data.description === 'string') desc = data.description;
+      else if (data.description?.value) desc = data.description.value;
+      
+      return desc || "No description available.";
     } catch {
       return "Failed to load description.";
     }
@@ -290,7 +297,9 @@
         author: doc.author_name?.[0] ?? "Unknown author",
         year: doc.first_publish_year?.toString() ?? "—",
         pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
-        summary: doc.first_sentence?.[0] || "Click for details...",
+        // FIX: Replaced "Click for details..." with empty string. 
+        // The card will default to "No description available." automatically if empty.
+        summary: doc.first_sentence?.[0] || "",
         fullSummary: null,
         coverUrl: doc.cover_i 
           ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` 
@@ -332,7 +341,7 @@
       const data = await res.json();
       
       return (data.data?.Page?.media ?? []).map((m: any) => {
-        let desc = m.description || "No description available.";
+        let desc = m.description || ""; // Default to empty if missing
         desc = desc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
         return {
           title: m.title.english || m.title.romaji || query,
@@ -418,12 +427,27 @@
 
   async function handleOpenSummary(event: CustomEvent) {
     const book = event.detail;
+
+    // Logic for OpenLibrary (Lazy loading)
     if (book.key && !book.fullSummary) {
+      // 1. Show modal immediately with loading state
       summaryBook = { ...book, fullSummary: "Loading full description..." };
+
+      // 2. Fetch the description
       const fullDesc = await fetchOpenLibraryDescription(book.key);
+
+      // 3. Update the modal's content
       summaryBook = { ...book, fullSummary: fullDesc, summary: fullDesc };
-      foundBooks = foundBooks.map(b => b.key === book.key ? summaryBook : b);
-    } else {
+
+      // 4. Update the source list 'quietly'
+      const foundIndex = foundBooks.findIndex(b => b.key === book.key);
+      if (foundIndex !== -1) {
+        foundBooks[foundIndex].fullSummary = fullDesc;
+        foundBooks[foundIndex].summary = fullDesc;
+      }
+    } 
+    // Logic for Anilist (Already has description)
+    else {
       summaryBook = book;
     }
   }
@@ -602,6 +626,7 @@
     <Toast title="Book Exists" message="This book is already in your library." />
   {/if}
 </main>
+
 
 <style>
   /* #region --- LAYOUT & CONTAINERS --- */

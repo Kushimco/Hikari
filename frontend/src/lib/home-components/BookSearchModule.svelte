@@ -170,7 +170,10 @@
               <div class="book-info">
                 <h2>{currentBook.title}</h2>
                 <p class="book-meta">
-                  {currentBook.author} · {currentBook.year} · {currentBook.pages} pages
+                  {currentBook.author} · {currentBook.year}
+                </p>
+                <p class="book-pages-count">
+                  {currentBook.pages} pages
                 </p>
                 <button
                   type="button"
@@ -178,7 +181,7 @@
                   on:click={() => handleOpenSummary(currentBook)}
                   aria-label={`Read full description of ${currentBook.title}`}
                 >
-                  {currentBook.summary}
+                  {currentBook.summary || 'No description available.'}
                 </button>
               </div>
             </div>
@@ -266,6 +269,7 @@
   </div>
 {/if}
 
+
 <style>
   /* #region --- API SELECTOR --- */
   .api-selector {
@@ -299,8 +303,8 @@
 
   /* #region --- CAROUSEL & CARDS --- */
   .carousel-shell {
-    width: 420px; max-width: 100%;
-    display: flex; flex-direction: column; gap: 18px;
+    width: 420px; max-width: 90vw; /* Strict container width */
+    display: flex; flex-direction: column; gap: 14px; 
     align-items: center; justify-content: center;
     transition: opacity 0.3s ease;
   }
@@ -311,68 +315,95 @@
     align-items: center; column-gap: 10px;
   }
 
-  .book-card-wrapper { position: relative; }
+  /* CRITICAL FIX: min-width: 0 ensures flex child shrinks */
+  .book-card-wrapper { position: relative; width: 100%; min-width: 0; } 
 
   .book-card {
-    display: flex; gap: 20px; align-items: center;
+    display: flex; gap: 16px; align-items: center;
     background: rgba(255, 255, 255, 0.3);
-    border-radius: 24px; padding: 22px 24px;
+    border-radius: 20px; padding: 16px 20px;
     border: 1px solid rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06);
+    height: 140px; 
+    width: 100%; /* Ensure it fits wrapper */
+    box-sizing: border-box; 
+    overflow: hidden; /* Prevent spillover */
   }
 
   .book-card-adding { animation: resultAddOut 0.55s cubic-bezier(0.15, 0.9, 0.3, 1) forwards; }
   .book-card-discarding { animation: resultDiscardOut 0.45s cubic-bezier(0.25, 0.7, 0.35, 1) forwards; }
 
   .book-cover {
-    width: 96px; min-width: 96px; height: 128px;
-    border-radius: 18px; background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
-    box-shadow: 0 10px 25px rgba(181, 119, 83, 0.35), inset 0 0 12px rgba(255, 255, 255, 0.7);
+    width: 80px; min-width: 80px; height: 108px;
+    border-radius: 12px; background: linear-gradient(145deg, #f0c3a3, #f7e4d3);
+    box-shadow: 0 8px 20px rgba(181, 119, 83, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.7);
     overflow: hidden; flex-shrink: 0;
     display: flex; align-items: stretch; justify-content: center;
   }
   .book-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-  .book-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-  .book-info h2 { margin: 0; font-size: 1.05rem; font-weight: 600; color: #4b332e; text-align: left; }
-  .book-meta { margin: 0; font-size: 0.85rem; color: rgba(75, 51, 46, 0.7); }
+  /* CRITICAL FIX: min-width: 0 here is required for truncation to work in flex */
+  .book-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; justify-content: center; }
+  
+  .book-info h2 { 
+    margin: 0; font-size: 1rem; font-weight: 700; color: #4b332e; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+    max-width: 100%; /* Force truncation */
+  }
+  
+  .book-meta { margin: 0; font-size: 0.85rem; color: rgba(75, 51, 46, 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  
+  .book-pages-count {
+    margin: 0; font-size: 0.8rem; font-weight: 600; color: rgba(91, 59, 48, 0.6);
+  }
 
+  /* --- TRUNCATED SUMMARY --- */
   .book-summary-button {
     margin: 6px 0 0; padding: 0; border: none; background: none; font: inherit; text-align: left;
-    cursor: pointer; font-size: 0.92rem; line-height: 1.4; color: rgba(75, 51, 46, 0.8);
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+    cursor: pointer; font-size: 0.85rem; line-height: 1.35; color: rgba(75, 51, 46, 0.8);
+    
+    /* Clamp to exactly 2 lines & Add Ellipsis */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    
+    height: 2.7em; 
+    width: 100%;
   }
   .book-summary-button:hover, .book-summary-button:focus-visible { color: rgba(75, 51, 46, 0.95); outline: none; }
   /* #endregion */
 
   /* #region --- NAVIGATION & CONTROLS --- */
   .nav-bubble {
-    width: 40px; height: 40px; border-radius: 999px;
+    width: 36px; height: 36px; border-radius: 999px; 
     border: 1px solid rgba(255, 255, 255, 0.7);
     background: rgba(255, 255, 255, 0.2); color: #5b3b30;
-    font-size: 1.4rem; display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; display: flex; align-items: center; justify-content: center;
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    cursor: pointer; box-shadow: 0 10px 25px rgba(181, 119, 83, 0.25);
+    cursor: pointer; box-shadow: 0 8px 20px rgba(181, 119, 83, 0.2);
     transition: opacity 0.18s ease, background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
-    opacity: 1;
+    opacity: 1; flex-shrink: 0;
   }
   .nav-bubble:hover:not(.nav-hidden) { background: rgba(255, 255, 255, 0.32); transform: translateY(-1px); }
   .nav-hidden { opacity: 0; pointer-events: none; }
   .nav-bubble-left { justify-self: flex-start; }
   .nav-bubble-right { justify-self: flex-end; }
 
-  .dot-row { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
-  .dot { width: 6px; height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.5); }
+  .dot-row { display: flex; justify-content: center; gap: 6px; margin-top: 8px; }
+  .dot { width: 5px; height: 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.5); }
   .dot-active { background: rgba(181, 119, 83, 0.95); box-shadow: 0 0 10px rgba(181, 119, 83, 0.7); }
 
   .carousel-footer { display: flex; gap: 12px; justify-content: center; }
 
   .pill-btn {
-    min-width: 110px; padding: 9px 22px; border-radius: 999px;
+    min-width: 100px; padding: 8px 20px; border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.7);
     background: rgba(255, 255, 255, 0.22); color: #5b3b30;
-    font-size: 0.9rem; font-weight: 500;
+    font-size: 0.85rem; font-weight: 500;
     backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
     cursor: pointer; transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
   }
@@ -388,15 +419,15 @@
   .glass-capsule {
     background: rgba(255, 255, 255, 0.3);
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    padding: 18px 36px; border-radius: 100px;
+    padding: 16px 32px; border-radius: 100px;
     border: 1px solid rgba(255, 255, 255, 0.5);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
-    width: 340px; display: flex; align-items: center; justify-content: center;
+    width: 320px; display: flex; align-items: center; justify-content: center;
     transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
   }
   .glass-capsule.fade-in-delayed { animation: fadeIn 0.8s ease forwards; opacity: 0; }
   .glass-capsule-loading {
-    width: 72px; height: 72px; padding: 0; border-radius: 999px;
+    width: 64px; height: 64px; padding: 0; border-radius: 999px;
     box-shadow: 0 14px 36px rgba(181, 119, 83, 0.35);
     background: rgba(255, 255, 255, 0.45);
   }
@@ -407,14 +438,14 @@
 
   input {
     width: 100%; background: transparent; border: none; outline: none;
-    font-size: 1.2rem; color: #5e4b4b; text-align: center;
+    font-size: 1.1rem; color: #5e4b4b; text-align: center;
     font-weight: 500; font-family: "Inter", sans-serif;
   }
   input::placeholder { color: rgba(94, 75, 75, 0.45); font-weight: 400; transition: opacity 0.15s ease-out; }
   input:focus::placeholder { opacity: 0; }
   
   .loading-circle {
-    width: 48px; height: 48px; border-radius: 50%;
+    width: 40px; height: 40px; border-radius: 50%;
     border: 3px solid rgba(255, 255, 255, 0.6); border-top-color: rgba(205, 132, 94, 1);
     box-shadow: 0 0 24px rgba(205, 132, 94, 0.4); animation: spin 0.9s linear infinite;
   }
