@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "1.0.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -30,3 +30,6 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 tokio = "1.48.0"
 tauri-plugin-dialog = "2"
 base64 = "0.22.1"
+tauri-plugin-http = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
