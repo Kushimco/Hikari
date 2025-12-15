@@ -1,5 +1,4 @@
 <script lang="ts">
-  // We export 'activeTab' so the parent (App.svelte) can bind to it
   export let activeTab: string;
 </script>
 
@@ -31,12 +30,12 @@
       </svg>
     </button>
 
-    <!-- More Button -->
+    <!-- Settings Button (Updated from 'more' to 'settings') -->
     <button 
       class="nav-btn" 
-      class:active={activeTab === 'more'} 
-      on:click={() => activeTab = 'more'}
-      aria-label="More">
+      class:active={activeTab === 'settings'} 
+      on:click={() => activeTab = 'settings'}
+      aria-label="Settings">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="2"></circle>
         <circle cx="19" cy="12" r="2"></circle>

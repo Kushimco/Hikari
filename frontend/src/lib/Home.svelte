@@ -1,84 +1,173 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
+  import { fade, scale, fly } from 'svelte/transition';
+  import { cubicIn, cubicOut, elasticOut } from 'svelte/easing';
+  import { tick, onMount } from 'svelte';
+
+  // Components
   import Sidebar from './Sidebar.svelte';
   import Library from './Library.svelte';
+  import Settings from './Settings.svelte';
   import Background from './home-components/Background.svelte';
   import Orb from './home-components/Orb.svelte';
   import BookSearchModule from './home-components/BookSearchModule.svelte';
-  import { invoke } from '@tauri-apps/api/core';
-  import { fade, scale, fly } from 'svelte/transition'; // Added 'fly'
+  import AddBookDialog from './home-components/AddBookModal.svelte';
+  import SummaryModal from './home-components/SummaryModal.svelte';
+  import Toast from './home-components/Toast.svelte';
 
-  // UI state
-  let bookTitle = "";
-  let isPulsing = false;
-  let isFocused = false;
-  let activeTab: "home" | "menu" = "home";
-  let previousTab: "home" | "menu" = activeTab;
-  let typingPulseTimeout: number; // Added for the pulse timer
+  // --- Tabs ---
+  let requestedTab: "home" | "menu" | "settings" = "home";
+  let activeTab: "home" | "menu" | "settings" = "home";
+  let previousTab: "home" | "menu" | "settings" = activeTab;
 
-  // Return animation state
-  type ReturnStage = "idle" | "fading" | "bouncing_down" | "bouncing_up";
-  let returnStage: ReturnStage = "idle";
+  // --- Settings animation stages ---
+  let settingsStage: "idle" | "collapsing" | "glowing" | "dividing" | "gathering" = "idle";
+  let isOpeningSettings = false;
+
+  // --- Return from settings -> home ---
+  let returningFromSettings = false;
+
+  // Overlay expansion (the “big expand” after gather)
+  let showHomeExpandOrb = false;
+
+  // Keep overlay mounted while we fade its glow out
+  let overlayHoldVisible = false;
+  let overlayGlowOff = false;
+
+  // Prevent second “home orb intro / bounce” after overlay expansion
+  let skipHomeIntroOnce = false;
+  let suppressHomeBounceOnce = false;
+
+  // --- Overlay timing (MUST match CSS durations below) ---
+  const overlayExpandMs = 650;
+  // Total fade duration (match .expand-overlay transition)
+  const overlayFadeMs = 900;
+  // Start fading this much BEFORE expand ends (so it begins disappearing sooner)
+  const overlayFadeLeadMs = 250;
+
+  // Return animation (your existing home bounce)
+  let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up" = "idle";
   let isReturning = false;
 
-  // Search / result state
-  type SearchState = "idle" | "loading" | "result";
-  let searchState: SearchState = "idle";
+  // Search & Data State
+  let bookTitle = "";
+  let searchState: "idle" | "loading" | "result" = "idle";
+  let foundBooks: any[] = [];
+  let isPulsing = false;
+  let isFocused = false;
+  let typingPulseTimeout: number | undefined;
+  let selectedApi: "openlibrary" | "anilist" = "openlibrary";
+  let lastQuery = "";
+  let isApiSwitching = false;
+  let apiResults: { [key in "openlibrary" | "anilist"]: any[] | null } = {
+    openlibrary: null,
+    anilist: null
+  };
 
-  // --- NEW STATE FOR DUPLICATE TOAST ---
+  // Modal States
+  let showAddDialog = false;
   let showDuplicateToast = false;
-
-  type MockBook = {
-    title: string;
-    author: string;
-    year: string;
-    pages: string;
-    summary: string;
-    fullSummary?: string;
-    coverUrl?: string | null;
-  };
-
-  type LibraryBook = {
-    id: string;
-    title: string;
-    author: string;
-    cover: string;
-    cover_color: string;
-    status: string;
-    pages_read: number;
-    total_pages: number;
-    date_added: string;
-  };
-
-  type BookStatus = "to-read" | "reading" | "finished";
-
-  const MAX_RESULTS = 10;
-
-  let foundBooks: MockBook[] = [];
-
-  let isAdding = false;
-  let isDiscarding = false;
-
-  let summaryBook: MockBook | null = null;
+  let pendingBook: any | null = null;
+  let summaryBook: any | null = null;
   let orbElement: HTMLDivElement | null = null;
 
-  // Add-details popup state
-  let showAddDialog = false;
-  let pendingBook: MockBook | null = null;
-  let statusInput: BookStatus = "reading";
-  let pagesReadInput = "0";
-  let totalPagesInput = "0";
+  // --- GOAL TOAST STATE ---
+  let showGoalToast = false;
+  let readingGoal = 10;
+  let booksFinishedCount = 0;
+  let toastTimer: number | null = null;
 
-  // Tab change effects
-  $: if (activeTab !== previousTab) {
-    if (previousTab === "menu" && activeTab === "home") {
-      triggerBounceSequence();
-    }
-    previousTab = activeTab;
+  // Keep glow while collapsing + while overlay is visible
+  $: isGlowing =
+    (isReturning && returnStage !== "idle") ||
+    isFocused ||
+    searchState !== "idle" ||
+    showAddDialog ||
+    isPulsing ||
+    settingsStage === "collapsing" ||
+    showHomeExpandOrb ||
+    overlayHoldVisible;
+
+  function wait(ms: number) {
+    return new Promise<void>((r) => setTimeout(r, ms));
   }
 
-  // Reactive Logic for "Finished" status
-  $: if (statusInput === "finished") {
-    pagesReadInput = totalPagesInput;
+  // --- GOAL CHECKER LOGIC ---
+  async function checkGoalCompletion() {
+    try {
+        const savedGoal = localStorage.getItem('hikari_reading_goal');
+        if (savedGoal) readingGoal = parseInt(savedGoal, 10);
+
+        const books: any[] = await invoke('get_books');
+        booksFinishedCount = books.filter(b => b.status === 'finished').length;
+
+        const alreadyNotified = localStorage.getItem('hikari_goal_notified') === 'true';
+
+        if (booksFinishedCount >= readingGoal && booksFinishedCount > 0) {
+            if (!alreadyNotified) {
+                showGoalToast = true;
+                localStorage.setItem('hikari_goal_notified', 'true');
+                if (toastTimer) clearTimeout(toastTimer);
+                toastTimer = window.setTimeout(() => {
+                    showGoalToast = false;
+                }, 6000);
+            }
+        }
+    } catch (err) {
+        console.error("Goal check failed", err);
+    }
+  }
+
+  function closeGoalToast() {
+    showGoalToast = false;
+    if (toastTimer) clearTimeout(toastTimer);
+  }
+
+  onMount(() => {
+    checkGoalCompletion();
+  });
+
+  // Intercept requested tab changes to allow animations
+  $: if (requestedTab !== activeTab) {
+    // Check goal when switching back to home or library
+    if (requestedTab === "home" || requestedTab === "menu") {
+         checkGoalCompletion();
+    }
+
+    // SETTINGS -> HOME (play gathering first)
+    if (activeTab === "settings" && requestedTab === "home" && !returningFromSettings) {
+      returningFromSettings = true;
+      settingsStage = "gathering";
+    }
+    // Normal switch (no special animation)
+    else if (!returningFromSettings) {
+      activeTab = requestedTab;
+    }
+  }
+
+  // Track previous tab for other logic
+  $: if (activeTab !== previousTab) {
+    // Returning to home bounce (disable if we just came from settings expansion)
+    if (activeTab === "home") {
+      if (!suppressHomeBounceOnce) {
+        triggerBounceSequence();
+      }
+    }
+
+    // Going TO settings: start collapsing immediately
+    if (activeTab === "settings" && previousTab !== "settings") {
+      restoreOrbFloat();
+      isOpeningSettings = true;
+      settingsStage = "collapsing";
+    }
+
+    // Leaving settings (after commit)
+    if (previousTab === "settings" && activeTab !== "settings") {
+      isOpeningSettings = false;
+      settingsStage = "idle";
+    }
+
+    previousTab = activeTab;
   }
 
   async function triggerBounceSequence() {
@@ -93,310 +182,89 @@
     isReturning = false;
   }
 
-  function wait(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  // Called when big orb OUT transition completes (home->settings chain)
+  async function handleOrbOutroEnd() {
+    if (!isOpeningSettings) return;
+
+    settingsStage = "glowing";
+    await wait(240);
+
+    if (activeTab === "settings") settingsStage = "dividing";
+    isOpeningSettings = false;
   }
 
-  function shorten(text: string, maxChars = 260): string {
-    if (!text) return "";
-    if (text.length <= maxChars) return text;
-    const cut = text.slice(0, maxChars);
-    const lastSpace = cut.lastIndexOf(" ");
-    const trimmed = lastSpace > 0 ? cut.slice(0, lastSpace) : cut;
-    return trimmed + "…";
+  // SETTINGS -> HOME: called by Settings when all bubbles have merged into seed
+  async function handleSettingsReadyToExpand() {
+    if (!returningFromSettings) return;
+
+    // 1) Expand overlay orb ONCE (keep it mounted afterward for glow fade)
+    overlayHoldVisible = true;
+    overlayGlowOff = false;
+    showHomeExpandOrb = true;
+
+    // Start fading BEFORE the expand ends (so glow starts disappearing sooner)
+    const fadeStartAt = Math.max(0, overlayExpandMs - overlayFadeLeadMs);
+    const fadeTimer = window.setTimeout(() => {
+      overlayGlowOff = true;
+    }, fadeStartAt);
+
+    await wait(overlayExpandMs); // must match overlay in:scale duration
+
+    // Expand finished; stop showing "expand overlay" transition wrapper
+    showHomeExpandOrb = false;
+
+    // 2) Commit to Home but skip Home's own orb intro/bounce for the first render
+    suppressHomeBounceOnce = true;
+    skipHomeIntroOnce = true;
+
+    returningFromSettings = false;
+    settingsStage = "idle";
+    activeTab = "home";
+    requestedTab = "home";
+
+    // Wait until the DOM applied the Home mount before clearing flags
+    await tick();
+
+    suppressHomeBounceOnce = false;
+    skipHomeIntroOnce = false;
+
+    // Ensure fade definitely started (in case timings were changed)
+    overlayGlowOff = true;
+    clearTimeout(fadeTimer);
+
+    // Only keep overlay mounted for the REMAINING fade time (no lingering)
+    const elapsedFadeByNow = overlayExpandMs - fadeStartAt;
+    const remainingFade = Math.max(0, overlayFadeMs - elapsedFadeByNow);
+    await wait(remainingFade);
+
+    overlayHoldVisible = false;
+    overlayGlowOff = false;
   }
 
-  function firstSentence(text: string): string {
-    if (!text) return "";
-    const match = text.match(/[^.!?]+[.!?]/);
-    return match ? match[0].trim() : text;
-  }
-
-  function cleanDescription(raw: string): string {
-    if (!raw) return "";
-    let text = raw;
-    const cutMarkers = [
-      "Also contained in:",
-      "This work has also been published",
-      "----------"
-    ];
-    for (const marker of cutMarkers) {
-      const idx = text.indexOf(marker);
-      if (idx !== -1) {
-        text = text.slice(0, idx);
-      }
+  // --- ORB HANDLERS ---
+  function handleFocus() {
+    if (activeTab === "home") {
+      isFocused = true;
+      settleOrbToCenter();
     }
-    text = text.replace(/\[(.*?)\]\(.*?\)/g, "$1");
-    text = text.replace(/\(\[source]\[\d+]\)/gi, "");
-    text = text.replace(/\[\d+]:\s*https?:\/\/\S+/gi, "");
-    text = text.replace(/\s+/g, " ").trim();
-    return text;
   }
 
-  $: isGlowing =
-    (isReturning && returnStage !== "idle") ||
-    (isFocused && activeTab === "home") ||
-    searchState === "loading" ||
-    searchState === "result" ||
-    isAdding ||
-    isPulsing;
-
-  $: shouldScale = (isFocused && activeTab === "home" && !isReturning) || isPulsing;
-
-  // UPDATED FUNCTION: Handles the pulsation logic
-  function handleInput(_event: CustomEvent<Event>) {
-    if (activeTab !== "home") return;
-    
-    // Reset timer on each keystroke
-    clearTimeout(typingPulseTimeout);
-    
-    // Activate pulse
-    isPulsing = true;
-    
-    // Deactivate pulse after 300ms of inactivity
-    typingPulseTimeout = setTimeout(() => {
-      isPulsing = false;
-    }, 100);
-  }
-
-  function handleFocus(_event: CustomEvent<FocusEvent>) {
-    if (activeTab !== "home") return;
-    isFocused = true;
-    settleOrbToCenter();
-  }
-
-  function handleBlur(_event: CustomEvent<FocusEvent>) {
+  function handleBlur() {
     isFocused = false;
     restoreOrbFloat();
-  }
-
-  async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
-    const e = event.detail;
-    if (e.key !== "Enter" || !bookTitle.trim() || searchState !== "idle") return;
-
-    const query = bookTitle.trim();
-    bookTitle = "";
-    searchState = "loading";
-
-    try {
-      const res = await fetch(
-        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn`
-      );
-
-      if (!res.ok) {
-        throw new Error(`Open Library error: ${res.status}`);
-      }
-
-      const data: any = await res.json();
-      const docs: any[] = data.docs ?? [];
-
-      if (!docs.length) {
-        searchState = "idle";
-        return;
-      }
-
-      const books: MockBook[] = [];
-
-      for (const doc of docs) {
-        let coverUrl: string | null = null;
-        if (doc.cover_i) {
-          coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg?default=false`;
-        } else if (doc.isbn?.[0]) {
-          coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg?default=false`;
-        }
-
-        let fullSummary = "";
-        if (doc.key) {
-          try {
-            const workRes = await fetch(`https://openlibrary.org${doc.key}.json`);
-            if (workRes.ok) {
-              const workData: any = await workRes.json();
-              const desc = workData.description;
-              if (typeof desc === "string") {
-                fullSummary = desc;
-              } else if (desc && typeof desc === "object" && desc.value) {
-                fullSummary = desc.value;
-              }
-            }
-          } catch (err) {
-            console.error("Failed to fetch work description", err);
-          }
-        }
-
-        if (!fullSummary) {
-          fullSummary = "No description available.";
-        }
-
-        const cleaned = cleanDescription(fullSummary);
-        const teaser = firstSentence(cleaned);
-        
-        const pageCount = doc.number_of_pages_median || doc.number_of_pages || 0;
-
-        books.push({
-          title: doc.title ?? query,
-          author: doc.author_name?.[0] ?? "Unknown author",
-          year: doc.first_publish_year?.toString() ?? "—",
-          pages: pageCount.toString(),
-          summary: shorten(teaser, 120),
-          fullSummary: cleaned,
-          coverUrl
-        });
-      }
-
-      foundBooks = books;
-      searchState = "result";
-    } catch (err) {
-      console.error(err);
-      searchState = "idle";
-    }
-  }
-
-  function handleAddRequest(event: CustomEvent<MockBook>) {
-    const book = event.detail;
-    if (!book || isAdding || isDiscarding) return;
-
-    pendingBook = book;
-    statusInput = "reading";
-    
-    const p = parseInt(book.pages || "0", 10);
-    totalPagesInput = isNaN(p) ? "0" : String(p);
-    pagesReadInput = "0";
-    
-    showAddDialog = true;
-  }
-
-  function cancelAddDialog() {
-    showAddDialog = false;
-    pendingBook = null;
-  }
-
-  function incrementPages() {
-    if (statusInput === "finished") return;
-    const current = Number.parseInt(pagesReadInput || "0", 10);
-    const total = Number.parseInt(totalPagesInput || "0", 10);
-    const base = Number.isNaN(current) || current < 0 ? 0 : current;
-    if (total > 0 && base >= total) {
-       pagesReadInput = String(total);
-       return; 
-    }
-    pagesReadInput = String(base + 1);
-  }
-
-  function decrementPages() {
-    if (statusInput === "finished") return;
-    const n = Number.parseInt(pagesReadInput || "0", 10);
-    const base = Number.isNaN(n) || n <= 0 ? 0 : n;
-    pagesReadInput = String(Math.max(0, base - 1));
-  }
-
-  function handlePageInput() {
-      const current = parseInt(pagesReadInput);
-      const total = parseInt(totalPagesInput);
-      if (!isNaN(total) && total > 0 && current > total) {
-          pagesReadInput = String(total);
-      }
-  }
-
-  function confirmAddDialog() {
-    if (!pendingBook || isAdding) return;
-
-    const pages_read = Number.parseInt(pagesReadInput || "0", 10);
-    const total_pages = Number.parseInt(totalPagesInput || "0", 10);
-    const safePagesRead = Number.isNaN(pages_read) || pages_read < 0 ? 0 : pages_read;
-    const safeTotalPages = Number.isNaN(total_pages) || total_pages < 0 ? 0 : total_pages;
-
-    isAdding = true;
-
-    const payload = {
-        title: pendingBook.title,
-        author: pendingBook.author,
-        cover: pendingBook.coverUrl ?? "", 
-        status: statusInput,
-        pagesRead: safePagesRead,
-        totalPages: safeTotalPages,
-    };
-
-    invoke('add_book', payload)
-      .then((saved) => {
-        // SUCCESS
-        console.log("Book saved:", saved);
-
-        // Trigger Orb Pulse
-        isPulsing = true;
-        setTimeout(() => { isPulsing = false; }, 600);
-
-        // Close Dialog
-        showAddDialog = false;
-        pendingBook = null;
-        resetSearch();
-      })
-      .catch((err) => {
-        // ERROR (DUPLICATE)
-        console.error("Save failed:", err);
-        
-        // Show the custom toast instead of alert
-        triggerDuplicateToast();
-      })
-      .finally(() => {
-        isAdding = false;
-      });
-  }
-  
-  // Helper to show duplicate toast
-  function triggerDuplicateToast() {
-      showDuplicateToast = true;
-      setTimeout(() => {
-          showDuplicateToast = false;
-      }, 3000); // Hide after 3 seconds
-  }
-
-  async function handleDone() {
-    if (isAdding || isDiscarding) return;
-    isDiscarding = true;
-    await wait(300);
-    isDiscarding = false;
-    resetSearch();
-  }
-
-  function resetSearch() {
-    searchState = "idle";
-    foundBooks = [];
-    isAdding = false;
-    isDiscarding = false;
-    summaryBook = null;
-  }
-
-  function handleOpenSummary(event: CustomEvent<MockBook>) {
-    const book = event.detail;
-    if (!book) return;
-    summaryBook = book;
-  }
-
-  function handleCloseSummary() {
-    summaryBook = null;
-  }
-
-  function handleOverlayClick(event: MouseEvent) {
-    if (event.target !== event.currentTarget) return;
-    handleCloseSummary();
-  }
-
-  function handleOverlayKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleCloseSummary();
-    } else if (event.key === "Escape") {
-      handleCloseSummary();
-    }
   }
 
   function settleOrbToCenter() {
     if (!orbElement) return;
     const el = orbElement;
-    const computed = getComputedStyle(el);
-    const currentTransform = computed.transform === "none" ? "" : computed.transform;
+
+    const computedStyle = window.getComputedStyle(el);
+    const currentTransform = computedStyle.transform === 'none' ? '' : computedStyle.transform;
+
     el.style.animation = "none";
     el.style.transform = currentTransform;
+    el.offsetHeight;
+
     requestAnimationFrame(() => {
       el.style.transition = "transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1)";
       el.style.transform = "translateY(0)";
@@ -409,572 +277,446 @@
     orbElement.style.transform = "";
     orbElement.style.animation = "";
   }
+
+  function handleInput() {
+    if (activeTab === "home") {
+      clearTimeout(typingPulseTimeout);
+      isPulsing = true;
+      typingPulseTimeout = window.setTimeout(() => (isPulsing = false), 100);
+    }
+  }
+
+  // --- API FUNCTIONS ---
+  
+  // Helper to fetch full description from OpenLibrary when a book is selected
+  async function fetchOpenLibraryDescription(key: string): Promise<string> {
+      try {
+          const res = await fetch(`https://openlibrary.org${key}.json`);
+          if (!res.ok) return "No description available.";
+          const data = await res.json();
+          // OL descriptions can be strings or objects: { type: 'text', value: '...' }
+          if (typeof data.description === 'string') return data.description;
+          if (data.description?.value) return data.description.value;
+          return "No description available.";
+      } catch {
+          return "Failed to load description.";
+      }
+  }
+
+  async function searchOpenLibrary(query: string): Promise<any[]> {
+    try {
+      // Added 'first_sentence' to fields for better immediate context
+      const res = await fetch(
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,number_of_pages_median,number_of_pages,cover_i,isbn,first_sentence`
+      );
+      if (!res.ok) return [];
+      const data: any = await res.json();
+      const docs: any[] = data.docs ?? [];
+      if (!docs.length) return [];
+
+      const books = docs.map(doc => {
+        let coverUrl: string | null = null;
+        if (doc.cover_i) coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
+        else if (doc.isbn?.[0]) coverUrl = `https://covers.openlibrary.org/b/isbn/${doc.isbn[0]}-M.jpg`;
+
+        // Use first_sentence as a preview if available
+        const preview = doc.first_sentence?.[0] || "Click for details...";
+
+        return {
+          title: doc.title ?? query,
+          author: doc.author_name?.[0] ?? "Unknown author",
+          year: doc.first_publish_year?.toString() ?? "—",
+          pages: (doc.number_of_pages_median || doc.number_of_pages || 0).toString(),
+          summary: preview,
+          fullSummary: null, // Will be fetched on demand
+          coverUrl,
+          key: doc.key
+        };
+      });
+
+      // Removed the aggressive image pre-loading loop here
+      // This prevents network congestion and makes results appear faster
+
+      return books;
+    } catch (err) {
+      console.error("Open Library search failed:", err);
+      return [];
+    }
+  }
+
+  async function searchAnilist(query: string): Promise<any[]> {
+    try {
+      const anilistQuery = `
+        query ($search: String) {
+          Page(perPage: 10) {
+            media(search: $search, type: MANGA, sort: POPULARITY_DESC) {
+              id
+              title { romaji english }
+              coverImage { large }
+              description
+              chapters
+              startDate { year }
+              staff(perPage: 1, sort: RELEVANCE) {
+                edges { node { name { full } } }
+              }
+            }
+          }
+        }
+      `;
+
+      const anilistRes = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query: anilistQuery, variables: { search: query } })
+      });
+
+      if (!anilistRes.ok) return [];
+      const anilistData = await anilistRes.json();
+      const media = anilistData.data?.Page?.media ?? [];
+
+      return media.map((manga: any) => {
+        // Strip HTML tags from AniList description
+        let cleanDesc = manga.description || "No description available.";
+        cleanDesc = cleanDesc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+        
+        return {
+            title: manga.title.english || manga.title.romaji || query,
+            author: manga.staff.edges?.[0]?.node?.name?.full ?? "Unknown author",
+            year: manga.startDate?.year?.toString() ?? "—",
+            pages: (manga.chapters || 0).toString(),
+            summary: cleanDesc.length > 200 ? cleanDesc.substring(0, 200) + "..." : cleanDesc,
+            fullSummary: cleanDesc,
+            coverUrl: manga.coverImage?.large,
+            key: null
+        };
+      });
+    } catch (err) {
+      console.error("AniList search failed:", err);
+      return [];
+    }
+  }
+
+  async function handleApiSwitch(api: "openlibrary" | "anilist") {
+    if (selectedApi === api || !lastQuery) return;
+    selectedApi = api;
+
+    const results = apiResults[api];
+    if (results) {
+      foundBooks = results;
+      return;
+    }
+
+    isApiSwitching = true;
+    try {
+      let searchResults: any[] = [];
+      if (api === "openlibrary") searchResults = await searchOpenLibrary(lastQuery);
+      else searchResults = await searchAnilist(lastQuery);
+
+      apiResults[api] = searchResults;
+      foundBooks = searchResults;
+    } catch {
+      foundBooks = [];
+    } finally {
+      isApiSwitching = false;
+    }
+  }
+
+  // --- DATA & MODALS ---
+  async function handleKeydown(event: CustomEvent<KeyboardEvent>) {
+    const e = event.detail;
+    if (e.key !== "Enter" || !bookTitle.trim() || searchState !== "idle") return;
+
+    const query = bookTitle.trim();
+    bookTitle = "";
+    lastQuery = query;
+    searchState = "loading";
+    apiResults = { openlibrary: null, anilist: null };
+
+    try {
+      const [openLibraryResults, anilistResults] = await Promise.all([
+        searchOpenLibrary(query),
+        searchAnilist(query)
+      ]);
+
+      apiResults.openlibrary = openLibraryResults;
+      apiResults.anilist = anilistResults;
+
+      if (selectedApi === "openlibrary" && openLibraryResults.length > 0) foundBooks = openLibraryResults;
+      else if (selectedApi === "anilist" && anilistResults.length > 0) foundBooks = anilistResults;
+      else if (openLibraryResults.length > 0) { selectedApi = "openlibrary"; foundBooks = openLibraryResults; }
+      else if (anilistResults.length > 0) { selectedApi = "anilist"; foundBooks = anilistResults; }
+      else foundBooks = [];
+
+      searchState = "result";
+    } catch (err) {
+      console.error(err);
+      searchState = "idle";
+    }
+  }
+
+  function handleAddRequest(event: CustomEvent) {
+    pendingBook = event.detail;
+    showAddDialog = true;
+  }
+
+  // Handler for opening the Summary Modal
+  // This now checks if we need to fetch a full description
+  async function handleOpenSummary(event: CustomEvent) {
+      let book = event.detail;
+      
+      // If it's an OpenLibrary book (has a key) and we don't have the full summary yet
+      if (book.key && !book.fullSummary) {
+          // Show modal immediately with what we have
+          summaryBook = { ...book, fullSummary: "Loading full description..." };
+          
+          // Fetch description in background
+          const fullDesc = await fetchOpenLibraryDescription(book.key);
+          
+          // Update the modal
+          summaryBook = { ...book, fullSummary: fullDesc, summary: fullDesc };
+          
+          // Also update the book in the search results list so we don't fetch again
+          foundBooks = foundBooks.map(b => b.key === book.key ? { ...b, fullSummary: fullDesc, summary: fullDesc } : b);
+      } else {
+          summaryBook = book;
+      }
+  }
+
+  async function saveBook(event: CustomEvent) {
+    const { status, pagesRead, totalPages, book } = event.detail;
+
+    isPulsing = true;
+    setTimeout(() => (isPulsing = false), 600);
+
+    showAddDialog = false;
+    pendingBook = null;
+
+    searchState = "idle";
+    foundBooks = [];
+    apiResults = { openlibrary: null, anilist: null };
+    lastQuery = "";
+
+    try {
+      await invoke('add_book', {
+        title: book.title,
+        author: book.author,
+        cover: book.coverUrl ?? "",
+        status,
+        pagesRead,
+        totalPages
+      });
+      // Re-check goal after adding a book
+      checkGoalCompletion();
+    } catch (err) {
+      showDuplicateToast = true;
+      setTimeout(() => (showDuplicateToast = false), 3000);
+    }
+  }
 </script>
 
 <main>
   <Background />
-  <Sidebar bind:activeTab={activeTab} />
+  <Sidebar bind:activeTab={requestedTab} />
+
+  <!-- GLOBAL GOAL TOAST (Right Positioned) -->
+  {#if showGoalToast}
+    <div class="goal-toast" transition:fly={{ y: -50, x: 20, duration: 800, easing: elasticOut }}>
+        <div class="toast-icon-circle">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <div class="toast-content">
+            <div class="toast-title">Goal Reached!</div>
+            <div class="toast-msg">You've finished {readingGoal} books.</div>
+        </div>
+        <button class="toast-close" on:click={closeGoalToast} aria-label="Close notification">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="toast-glow"></div>
+    </div>
+  {/if}
 
   <section class="orb-stage">
-    <Orb
-      bind:orbElement={orbElement}
-      {activeTab}
-      {isReturning}
-      {returnStage}
-      {isGlowing}
-      {shouldScale}
-      {isPulsing}
-      {isAdding}
-    >
-      {#if activeTab === "home" && !isReturning}
-        <BookSearchModule
-          bind:bookTitle={bookTitle}
-          {searchState}
-          books={foundBooks}
-          {isAdding}
-          {isDiscarding}
-          on:input={handleInput}
-          on:keydown={handleKeydown}
-          on:focus={handleFocus}
-          on:blur={handleBlur}
-          on:add={handleAddRequest}
-          on:done={handleDone}
-          on:openSummary={handleOpenSummary}
+    <!-- SETTINGS stays mounted while gathering/expanding back -->
+    {#if activeTab === "settings"}
+      <div class="settings-layer">
+        <Settings stage={settingsStage} on:readyToExpand={handleSettingsReadyToExpand} />
+      </div>
+    {/if}
+
+    <!-- Normal orb when not in settings -->
+    {#if activeTab !== "settings"}
+      <div
+        class="orb-wrapper"
+        in:scale={skipHomeIntroOnce
+          ? { duration: 0 }
+          : { duration: 600, easing: cubicOut, start: 0.2, delay: 200 }
+        }
+        out:scale={{ duration: 650, easing: cubicIn, start: 0.12 }}
+        on:outroend={handleOrbOutroEnd}
+      >
+        <Orb
+          bind:orbElement={orbElement}
+          {activeTab}
+          {isReturning}
+          {returnStage}
+          {isGlowing}
+          {isPulsing}
+          shouldScale={(isFocused && activeTab === "home" && !isReturning) || isPulsing}
+          isAdding={showAddDialog}
+        >
+          {#if activeTab === "home" && !isReturning}
+            <div class="search-container" in:fade={{ duration: 260, delay: 80 }} out:fade={{ duration: 180 }}>
+              <BookSearchModule
+                bind:bookTitle={bookTitle}
+                {searchState}
+                books={foundBooks}
+                {selectedApi}
+                {isApiSwitching}
+                on:input={handleInput}
+                on:keydown={handleKeydown}
+                on:focus={handleFocus}
+                on:blur={handleBlur}
+                on:add={handleAddRequest}
+                on:openSummary={handleOpenSummary}
+                on:done={() => {
+                  searchState = "idle";
+                  foundBooks = [];
+                  apiResults = { openlibrary: null, anilist: null };
+                  lastQuery = "";
+                }}
+                on:apiSwitch={(e) => handleApiSwitch(e.detail)}
+              />
+            </div>
+          {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
+            <!-- keep your requested 700ms delay -->
+            <div class="library-container" class:fade-out={returnStage === "fading"} in:fade={{ duration: 400, delay: 700 }}>
+              <Library />
+            </div>
+          {/if}
+        </Orb>
+      </div>
+    {/if}
+
+    <!-- EXPAND overlay orb while still “in settings”, and keep it during glow fade-out -->
+    {#if showHomeExpandOrb || overlayHoldVisible}
+      <div
+        class="orb-wrapper expand-overlay"
+        class:fade-overlay={overlayGlowOff}
+        in:scale={{ duration: 650, easing: cubicOut, start: 0.12 }}
+      >
+        <Orb
+          bind:orbElement={orbElement}
+          activeTab={"home"}
+          isReturning={false}
+          returnStage={"idle"}
+          isGlowing={!overlayGlowOff}
+          shouldScale={false}
+          isPulsing={false}
+          isAdding={false}
         />
-      {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-        <div class="library-container" class:fade-out={returnStage === "fading"}>
-          <Library />
-        </div>
-      {/if}
-    </Orb>
+      </div>
+    {/if}
   </section>
 
   {#if summaryBook}
-    <div
-      class="summary-overlay"
-      role="button"
-      tabindex="0"
-      aria-label="Close description"
-      on:click={handleOverlayClick}
-      on:keydown={handleOverlayKeydown}
-      transition:fade={{ duration: 200 }}
-    >
-      <div class="summary-dialog" transition:scale={{ duration: 300, start: 0.95 }}>
-        <div class="summary-header">
-          <h3>{summaryBook.title}</h3>
-          <p class="summary-author">{summaryBook.author}</p>
-        </div>
-        <div class="summary-body">
-          <p>{summaryBook.fullSummary ?? summaryBook.summary}</p>
-        </div>
-        <div class="summary-actions">
-          <button class="pill-btn summary-close" on:click={handleCloseSummary}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+    <SummaryModal book={summaryBook} on:close={() => (summaryBook = null)} />
   {/if}
 
   {#if showAddDialog && pendingBook}
-    <div class="add-overlay" transition:fade={{ duration: 250 }}>
-      <div class="add-dialog">
-        <div class="add-header">
-          <h3>ADD TO LIBRARY</h3>
-          <p>{pendingBook.title}</p>
-          <span class="add-author">{pendingBook.author}</span>
-        </div>
-
-        <div class="add-body">
-          <label class="field">
-            <span>Status</span>
-            <div class="status-row">
-              <button
-                type="button"
-                class="status-pill"
-                class:status-pill-active={statusInput === "to-read"}
-                on:click={() => (statusInput = "to-read")}
-              >
-                To read
-              </button>
-              <button
-                type="button"
-                class="status-pill"
-                class:status-pill-active={statusInput === "reading"}
-                on:click={() => (statusInput = "reading")}
-              >
-                Reading
-              </button>
-              <button
-                type="button"
-                class="status-pill"
-                class:status-pill-active={statusInput === "finished"}
-                on:click={() => (statusInput = "finished")}
-              >
-                Finished
-              </button>
-            </div>
-          </label>
-
-          <label class="field field-center">
-            <span>Pages read / {totalPagesInput}</span>
-            <div class="pages-row" class:disabled-row={statusInput === "finished"}>
-              <button
-                type="button"
-                class="pages-arrow pages-arrow-left"
-                on:click={decrementPages}
-                disabled={statusInput === "finished"}
-                aria-label="Decrease pages read"
-              >
-                –
-              </button>
-              <input
-                type="number"
-                min="0"
-                bind:value={pagesReadInput}
-                on:input={handlePageInput}
-                disabled={statusInput === "finished"}
-                class="pages-input no-spin"
-              />
-              <button
-                type="button"
-                class="pages-arrow pages-arrow-right"
-                on:click={incrementPages}
-                disabled={statusInput === "finished"}
-                aria-label="Increase pages read"
-              >
-                +
-              </button>
-            </div>
-          </label>
-        </div>
-
-        <div class="add-actions">
-          <button
-            type="button"
-            class="pill-btn pill-secondary"
-            on:click={cancelAddDialog}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="pill-btn pill-primary"
-            on:click={confirmAddDialog}
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    <AddBookDialog book={pendingBook} on:cancel={() => (showAddDialog = false)} on:save={saveBook} />
   {/if}
 
-  <!-- NEW DUPLICATE TOAST NOTIFICATION -->
   {#if showDuplicateToast}
-    <div 
-        class="toast-overlay" 
-        transition:fly={{ y: 30, duration: 400, opacity: 0 }}
-    >
-        <div class="toast-card">
-            <div class="toast-icon">!</div>
-            <div class="toast-content">
-                <h4>Book Exists</h4>
-                <p>This book is already in your library.</p>
-            </div>
-        </div>
-    </div>
+    <Toast title="Book Exists" message="This book is already in your library." />
   {/if}
-
 </main>
 
 <style>
-  /* ... (Previous Global/Layout Styles) ... */
-  main {
-    display: flex;
-    height: 100vh;
-    width: 100vw;
-    position: relative;
-  }
+  main { display: flex; height: 100vh; width: 100vw; position: relative; }
+  .orb-stage { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; z-index: 5; }
 
-  .orb-stage {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
-    z-index: 5;
-  }
-
-  .library-container {
+  .orb-wrapper, .settings-layer {
     width: 100%;
     height: 100%;
-    opacity: 1;
-    transition: opacity 0.25s ease-out;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: absolute;
   }
 
-  .library-container.fade-out {
+  .orb-wrapper { transform-origin: 50% 50%; }
+
+  .settings-layer { z-index: 1; }
+  .orb-wrapper { z-index: 2; }
+  .orb-wrapper.expand-overlay { z-index: 3; pointer-events: none; }
+
+  /* Fade must match overlayFadeMs (900ms) and should be smooth (no linger). */
+  .expand-overlay {
+    opacity: 1;
+    transition: opacity 900ms cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  .expand-overlay.fade-overlay {
     opacity: 0;
   }
-  
-  /* --- TOAST STYLES --- */
-  .toast-overlay {
-      position: fixed;
-      bottom: 30px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1000;
-      pointer-events: none; /* Allows clicking through if needed */
-  }
 
-  .toast-card {
-      background: rgba(255, 255, 255, 0.85);
-      border-radius: 16px;
-      padding: 14px 20px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      box-shadow: 
-          0 10px 30px rgba(200, 100, 100, 0.15),
-          inset 0 0 20px rgba(255, 255, 255, 0.8);
-      border: 1px solid rgba(255, 200, 200, 0.5);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      min-width: 300px;
-  }
+  .search-container, .library-container { width: 100%; height: 100%; }
+  .search-container { display: flex; flex-direction: column; justify-content: center; align-items: center; }
 
-  .toast-icon {
-      width: 32px;
-      height: 32px;
-      background: linear-gradient(135deg, #ff9a9e, #fecfef);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-weight: 800;
-      font-size: 1.1rem;
-      box-shadow: 0 4px 10px rgba(255, 154, 158, 0.4);
-  }
+  .library-container { opacity: 1; }
+  .library-container.fade-out { opacity: 0; transition: opacity 0.25s ease-out; }
 
-  .toast-content {
-      display: flex;
-      flex-direction: column;
-  }
-
-  .toast-content h4 {
-      margin: 0;
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: #8e4a4a;
-  }
-
-  .toast-content p {
-      margin: 2px 0 0;
-      font-size: 0.85rem;
-      color: #8e4a4a;
-      opacity: 0.8;
-  }
-
-  /* ... (Summary, Add Dialog, Button styles kept exactly as before) ... */
-  .summary-overlay {
+  /* --- GLOBAL TOAST --- */
+  .goal-toast {
     position: fixed;
-    inset: 0;
-    z-index: 900;
-    background: rgba(34, 22, 19, 0.35);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    top: 30px; 
+    right: 30px; 
+    z-index: 20000;
+    
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px;
+    min-width: 280px;
+    
+    background: linear-gradient(135deg, rgba(255, 250, 245, 0.95), rgba(255, 235, 225, 0.90));
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 
+        0 10px 40px rgba(94, 75, 75, 0.15), 
+        0 4px 12px rgba(0,0,0,0.05),
+        inset 0 0 0 1px rgba(255,255,255,0.4);
+    
+    border-radius: 20px;
+    color: #5e4b4b;
+    backdrop-filter: blur(12px);
+    pointer-events: auto;
   }
 
-  .summary-dialog {
-    max-width: 620px;
-    max-height: 70vh;
-    width: 90%;
-    background: rgba(255, 255, 255, 0.78);
-    border-radius: 28px;
-    padding: 24px 26px 20px;
-    box-shadow:
-      0 18px 50px rgba(0, 0, 0, 0.18),
-      inset 0 0 18px rgba(255, 255, 255, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+  .toast-icon-circle {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, #a7e8bd, #76c690);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(134, 214, 160, 0.4);
+    flex-shrink: 0;
   }
+  .toast-icon-circle svg { width: 18px; height: 18px; }
 
-  .summary-header h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #4b332e;
-  }
+  .toast-content { flex: 1; }
+  .toast-title { font-weight: 800; font-size: 0.9rem; letter-spacing: 0.01em; margin-bottom: 2px; }
+  .toast-msg { font-size: 0.8rem; opacity: 0.7; font-weight: 500; }
 
-  .summary-author {
-    margin: 4px 0 0;
-    font-size: 0.9rem;
-    color: rgba(75, 51, 46, 0.7);
+  .toast-close {
+    background: transparent; border: none; cursor: pointer;
+    padding: 6px; border-radius: 50%;
+    color: #5e4b4b; opacity: 0.4;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
   }
+  .toast-close:hover { opacity: 1; background: rgba(94, 75, 75, 0.08); transform: rotate(90deg); }
+  .toast-close svg { width: 16px; height: 16px; }
 
-  .summary-body {
-    flex: 1;
-    overflow-y: auto;
-    padding-right: 4px;
-  }
-
-  .summary-body p {
-    margin: 0;
-    font-size: 0.95rem;
-    line-height: 1.5;
-    color: rgba(75, 51, 46, 0.9);
-  }
-
-  .summary-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 8px;
-  }
-
-  .summary-close {
-    min-width: 90px;
-  }
-
-  /* Add-details popup */
-  .add-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 950;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background:
-      radial-gradient(circle at top left, rgba(255, 190, 150, 0.4), transparent 55%),
-      radial-gradient(circle at bottom right, rgba(255, 140, 180, 0.35), transparent 60%),
-      rgba(255, 220, 200, 0.35);
-    backdrop-filter: blur(22px) saturate(1.25);
-    -webkit-backdrop-filter: blur(22px) saturate(1.25);
-  }
-
-  .add-dialog {
-    width: 420px;
-    max-width: 90vw;
-    background: rgba(255, 255, 255, 0.68);
-    border-radius: 26px;
-    padding: 20px 22px 18px;
-    box-shadow:
-      0 20px 40px rgba(180, 110, 80, 0.35),
-      inset 0 0 18px rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(255, 245, 240, 0.95);
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    transform-origin: center;
-  }
-
-  .add-header h3 {
-    margin: 0;
-    font-size: 0.95rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: rgba(131, 91, 74, 0.9);
-    text-align: center;
-  }
-
-  .add-header p {
-    margin: 4px 0 0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: #4b332e;
-    text-align: center;
-  }
-
-  .add-author {
-    font-size: 0.85rem;
-    color: rgba(75, 51, 46, 0.7);
-    text-align: center;
-  }
-
-  .add-body {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    margin-top: 10px;
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 0.85rem;
-    color: rgba(75, 51, 46, 0.8);
-  }
-
-  .field-center {
-    align-items: center;
-    text-align: center;
-  }
-
-  .field-center > span {
-    width: 100%;
-    text-align: center;
-  }
-
-  .status-row {
-    display: flex;
-    gap: 8px;
-  }
-
-  .status-pill {
-    flex: 1;
-    padding: 7px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.5);
-    color: #5b3b30;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition:
-      background 0.18s ease,
-      box-shadow 0.18s ease,
-      transform 0.12s ease;
-  }
-
-  .status-pill-active {
-    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
-    box-shadow: 0 8px 18px rgba(200, 120, 90, 0.3);
-    transform: translateY(-1px);
-  }
-
-  /* Pages input + custom arrows */
-  .pages-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    transition: opacity 0.2s ease, filter 0.2s ease;
-  }
-  
-  /* Disabled state styling */
-  .pages-row.disabled-row {
-    opacity: 0.5;
-    filter: grayscale(0.5);
-    pointer-events: none;
-  }
-
-  .pages-input {
-    width: 90px;
-    padding: 7px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.55);
-    box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.9);
-    color: #4b332e;
-    font-size: 0.9rem;
-    text-align: center;
-    outline: none;
-  }
-
-  .no-spin {
-    -moz-appearance: textfield;
-    appearance: textfield;
-  }
-  .no-spin::-webkit-outer-spin-button,
-  .no-spin::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  .pages-arrow {
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.42);
-    color: #5b3b30;
-    font-size: 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow:
-      0 6px 14px rgba(200, 120, 90, 0.25),
-      inset 0 0 8px rgba(255, 255, 255, 0.7);
-    transition:
-      background 0.15s ease,
-      transform 0.12s ease,
-      box-shadow 0.15s ease;
-  }
-
-  .pages-arrow:hover {
-    background: rgba(255, 255, 255, 0.65);
-    transform: translateY(-1px);
-  }
-  
-  .pages-arrow:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
-
-  .pages-arrow-left,
-  .pages-arrow-right {
-    padding-bottom: 1px;
-  }
-
-  .add-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: 6px;
-  }
-
-  /* -- BUTTON STYLES -- */
-  .pill-btn {
-    min-width: 90px;
-    padding: 8px 20px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.7);
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    transition:
-      background 0.18s ease,
-      transform 0.12s ease,
-      box-shadow 0.18s ease,
-      color 0.2s ease;
-  }
-
-  .pill-secondary {
-    background: rgba(255, 255, 255, 0.4);
-    color: #5b3b30;
-  }
-  
-  /* Save button: Ghost by default */
-  .pill-primary {
-    background: rgba(255, 255, 255, 0.5); 
-    color: #4b332e;
-    box-shadow: 0 4px 12px rgba(200, 120, 90, 0.15);
-  }
-
-  /* Hover: Slight Opacity Boost */
-  .pill-primary:hover {
-    background: rgba(255, 255, 255, 0.75);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(200, 120, 90, 0.2);
-  }
-
-  /* Active/Click: Colorful Burst */
-  .pill-primary:active {
-    background: linear-gradient(135deg, #ffcf9f, #f8a3b0);
-    color: #2c1810;
-    transform: translateY(1px);
-    box-shadow: 0 2px 8px rgba(200, 120, 90, 0.3);
-  }
-
-  .pill-secondary:hover {
-    background: rgba(255, 255, 255, 0.6);
-    transform: translateY(-1px);
+  .toast-glow {
+    position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    border-radius: 20px;
+    background: radial-gradient(circle at 10% 50%, rgba(167, 232, 189, 0.15), transparent 50%);
   }
 </style>

@@ -1,13 +1,16 @@
 <script lang="ts">
-  // Svelte 4 style; if you're on Svelte 5 you can switch to $props()
   export let orbElement: HTMLDivElement | null = null;
-  export let activeTab: "home" | "menu";
+  export let activeTab: "home" | "menu" | "settings";
   export let isReturning: boolean;
   export let returnStage: "idle" | "fading" | "bouncing_down" | "bouncing_up";
   export let isGlowing: boolean;
   export let shouldScale: boolean;
   export let isPulsing: boolean;
   export let isAdding: boolean;
+
+  // When the orb is tiny (your “small-orb” state), boost glow slightly
+  $: isTiny = isReturning && returnStage === "bouncing_down";
+  $: glowTiny = isGlowing && isTiny;
 </script>
 
 <div
@@ -18,8 +21,9 @@
     class="orb"
     bind:this={orbElement}
     class:expanded={activeTab === "menu" || (isReturning && returnStage === "fading")}
-    class:small-orb={isReturning && returnStage === "bouncing_down"}
+    class:small-orb={isTiny}
     class:glowing={isGlowing}
+    class:small-glow={glowTiny}
     class:typing-scale={shouldScale}
     class:pulsing={isPulsing && activeTab === "home"}
     class:add-success={isAdding}
@@ -29,7 +33,12 @@
 </div>
 
 <style>
-  /* Positions the orb bubble in the scene */
+  /* Match this to Home.svelte's overlay fade time */
+  :root {
+    --glow-fade: 900ms;
+    --glow-ease: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+
   .orb-floater {
     width: 780px;
     height: 780px;
@@ -45,7 +54,6 @@
       height 1.5s cubic-bezier(0.25, 1, 0.5, 1);
   }
 
-  /* Library view: orb expands into a panel */
   .orb-floater.expanded-floater {
     width: 96%;
     height: 95%;
@@ -56,23 +64,13 @@
     transform: translateY(0);
   }
 
-  /* Idle float for the orb */
   @keyframes float {
-    0% {
-      transform: translateY(0px);
-    }
-    25% {
-      transform: translateY(-12px);
-    }
-    75% {
-      transform: translateY(12px);
-    }
-    100% {
-      transform: translateY(0px);
-    }
+    0% { transform: translateY(0px); }
+    25% { transform: translateY(-12px); }
+    75% { transform: translateY(12px); }
+    100% { transform: translateY(0px); }
   }
 
-  /* Orb core: float, glow, and morph into library */
   .orb {
     position: relative;
     overflow: visible;
@@ -85,45 +83,53 @@
       rgba(244, 202, 167, 0.9) 60%,
       rgba(255, 189, 245, 0.7) 90%
     );
+
     box-shadow:
       inset 2px 4px 20px rgba(255, 255, 255, 0.6),
       inset -2px -4px 30px rgba(0, 0, 0, 0.05),
       0 25px 60px rgba(219, 168, 172, 0.35);
+
     display: flex;
     justify-content: center;
     align-items: center;
     max-width: 780px;
     max-height: 780px;
+
     transition:
-      box-shadow 2.5s ease,
+      /* Make glow-related shadow changes finish on the same schedule */
+      box-shadow var(--glow-fade) var(--glow-ease),
       width 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       height 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       border-radius 0.7s cubic-bezier(0.25, 1, 0.5, 1),
       background 1.5s ease,
       transform 0.6s cubic-bezier(0.25, 0.8, 0.25, 1),
-      filter 0.6s ease;
+      filter var(--glow-fade) var(--glow-ease);
+
     animation: float 8s ease-in-out infinite;
   }
 
-  /* Rim-light glow layer */
   .orb::before {
     content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
+
     box-shadow:
       inset 0 0 30px rgba(255, 255, 255, 0.9),
       0 0 120px rgba(255, 220, 180, 0.8),
       0 0 200px rgba(255, 200, 150, 0.4);
+
     opacity: 0;
     pointer-events: none;
-    transition: opacity 1.2s ease-out;
+
+    transition:
+      opacity var(--glow-fade) var(--glow-ease),
+      box-shadow var(--glow-fade) var(--glow-ease);
+
     z-index: -1;
   }
 
-  .orb.glowing::before {
-    opacity: 1;
-  }
+  .orb.glowing::before { opacity: 1; }
 
   .orb.glowing {
     box-shadow:
@@ -131,6 +137,23 @@
       0 0 120px rgba(255, 220, 180, 0.8),
       0 0 200px rgba(255, 200, 150, 0.4);
     filter: brightness(1.05);
+  }
+
+  /* Stronger/tighter glow when tiny */
+  .orb.small-glow::before {
+    opacity: 1;
+    box-shadow:
+      inset 0 0 18px rgba(255, 255, 255, 0.95),
+      0 0 70px rgba(255, 220, 180, 0.95),
+      0 0 110px rgba(255, 200, 150, 0.55);
+  }
+
+  .orb.small-glow {
+    box-shadow:
+      inset 0 0 22px rgba(255, 255, 255, 0.95),
+      0 0 70px rgba(255, 220, 180, 0.95),
+      0 0 110px rgba(255, 200, 150, 0.55);
+    filter: brightness(1.1);
   }
 
   .orb.small-orb {
@@ -152,27 +175,26 @@
     cursor: default;
     scrollbar-width: none;
     transform: scale(1) !important;
+
     box-shadow:
       inset 0 0 30px rgba(255, 255, 255, 0.9),
       0 0 120px rgba(255, 220, 180, 0.8),
       0 0 200px rgba(255, 200, 150, 0.4);
+
     filter: brightness(1.05);
+
     transition:
       width 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       height 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       border-radius 1.5s cubic-bezier(0.25, 1, 0.5, 1),
       background 1.5s ease,
-      box-shadow 1.5s ease-in-out 0.3s;
+      box-shadow var(--glow-fade) var(--glow-ease),
+      filter var(--glow-fade) var(--glow-ease);
   }
 
-  .orb.expanded::-webkit-scrollbar {
-    display: none;
-  }
+  .orb.expanded::-webkit-scrollbar { display: none; }
 
-  /* Extra orb pulse for successful add */
-  .orb.add-success {
-    animation: float 8s ease-in-out infinite, addPulse 0.6s ease-out;
-  }
+  .orb.add-success { animation: float 8s ease-in-out infinite, addPulse 0.6s ease-out; }
 
   @keyframes addPulse {
     0% {
@@ -196,14 +218,13 @@
     }
   }
 
-  /* Typing feedback */
   .orb.typing-scale {
     transform: scale(1.02);
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .orb.pulsing {
-    transform: scale(1.05) !important;
+    transform: translateY(0) scale(1.05) !important;
     transition: transform 0.05s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 </style>

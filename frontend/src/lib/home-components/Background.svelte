@@ -1,8 +1,12 @@
-<!-- src/lib/home-components/Background.svelte -->
+<script lang="ts">
+  // No logic needed, but required for TS type inference
+</script>
+
 <div class="ambient-light one"></div>
 <div class="ambient-light two"></div>
 
 <style>
+  /* ... your existing styles ... */
   .ambient-light {
     position: absolute;
     border-radius: 50%;

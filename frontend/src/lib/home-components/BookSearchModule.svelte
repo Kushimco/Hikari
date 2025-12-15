@@ -18,6 +18,8 @@
   export let books: MockBook[] = [];
   export let isAdding = false;
   export let isDiscarding = false;
+  export let selectedApi: "openlibrary" | "anilist" = "openlibrary";
+  export let isApiSwitching = false;
 
   const dispatch = createEventDispatcher<{
     input: Event;
@@ -27,6 +29,7 @@
     add: MockBook;
     done: void;
     openSummary: MockBook;
+    apiSwitch: "openlibrary" | "anilist";
   }>();
 
   let currentIndex = 0;
@@ -81,6 +84,10 @@
     dispatch("openSummary", book);
   }
 
+  function handleApiSwitch(api: "openlibrary" | "anilist") {
+    dispatch("apiSwitch", api);
+  }
+
   function handleDone() {
     dispatch("done");
   }
@@ -98,8 +105,31 @@
   }
 </script>
 
-{#if searchState === "result" && currentBook}
-  <div class="carousel-shell">
+{#if searchState === "result"}
+  <!-- API Selector Bubbles -->
+  <div class="api-selector">
+    <button
+      type="button"
+      class="api-bubble"
+      class:active={selectedApi === "openlibrary"}
+      on:click={() => handleApiSwitch("openlibrary")}
+      aria-label="Search Open Library for books"
+    >
+      Books
+    </button>
+    <button
+      type="button"
+      class="api-bubble"
+      class:active={selectedApi === "anilist"}
+      on:click={() => handleApiSwitch("anilist")}
+      aria-label="Search AniList for manga"
+    >
+      Manga
+    </button>
+  </div>
+
+  {#if currentBook}
+    <div class="carousel-shell" class:api-switching={isApiSwitching}>
     <div class="carousel-row">
       <button
         type="button"
@@ -188,6 +218,24 @@
       </button>
     </div>
   </div>
+  {:else}
+    <!-- No results found -->
+    <div class="no-results-container">
+      <div class="no-results-message">
+        <h3>No results found</h3>
+        <p>Try switching to the other API or search for something else.</p>
+      </div>
+      <div class="carousel-footer">
+        <button
+          type="button"
+          class="pill-btn pill-done"
+          on:click={handleDone}
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  {/if}
 {:else}
   <div
     class="glass-capsule"
@@ -210,7 +258,74 @@
   </div>
 {/if}
 
+
 <style>
+  .api-selector {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 0 20px;
+  }
+
+  .api-bubble {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
+    padding: 8px 16px;
+    /* CHANGED: Matches the #5b3b30 color of the 'Done/Add' buttons */
+    color: #5b3b30;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .api-bubble:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  }
+
+  .api-bubble.active {
+    background: rgba(255, 255, 255, 0.4);
+    /* CHANGED: Ensure active state keeps the dark brown color */
+    color: #5b3b30;
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  }
+
+  .no-results-container {
+    width: 420px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+  }
+
+  .no-results-message {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .no-results-message h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .no-results-message p {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.7;
+  }
+
   .carousel-shell {
     width: 420px;
     max-width: 100%;
@@ -219,6 +334,12 @@
     gap: 18px;
     align-items: center;
     justify-content: center;
+    transition: opacity 0.3s ease;
+  }
+
+  .carousel-shell.api-switching {
+    opacity: 0.3;
+    pointer-events: none;
   }
 
   .carousel-row {
