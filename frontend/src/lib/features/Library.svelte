@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { flip } from 'svelte/animate';
+  import { invoke } from '@tauri-apps/api/core'; // Needed for cover update command
   
   // Imports
   import * as API from '$lib/library-components/api';
@@ -10,9 +11,9 @@
   import LibraryHeader from '$lib/library-components/LibraryHeader.svelte'; 
 
   /* 
-     ================================================================
-     SECTION 1: STATE MANAGEMENT
-     ================================================================
+      ================================================================
+      SECTION 1: STATE MANAGEMENT
+      ================================================================
   */
   // {
     let books: Book[] = [];
@@ -23,9 +24,9 @@
   // }
 
   /* 
-     ================================================================
-     SECTION 2: COMPUTED & LIFECYCLE
-     ================================================================
+      ================================================================
+      SECTION 2: COMPUTED & LIFECYCLE
+      ================================================================
   */
   // {
     onMount(loadBooks);
@@ -33,10 +34,69 @@
     async function loadBooks() {
       try {
         books = await API.getBooks();
+        // Run auto-fix silently after loading
+        fixMissingCovers();
       } catch (err) {
         console.error("Failed to load books:", err);
       }
     }
+
+    // --- AUTO-FIX MISSING COVERS LOGIC ---
+    async function fixMissingCovers() {
+        const missing = books.filter(b => !b.cover || b.cover.trim() === "");
+        if (missing.length === 0) return;
+
+        console.log(`Fixing ${missing.length} missing covers...`);
+
+        for (const book of missing) {
+            let newCover = await searchOpenLibraryCover(book.title, book.author);
+            
+            if (!newCover) {
+                newCover = await searchAniListCover(book.title);
+            }
+
+            if (newCover) {
+                // 1. Update UI Instantly
+                books = books.map(b => b.id === book.id ? { ...b, cover: newCover! } : b);
+                
+                // 2. Save to Backend (using invoke directly or adding to your API class)
+                try {
+                    // Make sure 'update_book_cover' is registered in Rust!
+                    await invoke('update_book_cover', { id: book.id, cover: newCover });
+                    console.log(`Updated cover for: ${book.title}`);
+                } catch (err) {
+                    console.error(`Failed to save cover for ${book.title}`, err);
+                }
+            }
+        }
+    }
+
+    async function searchOpenLibraryCover(title: string, author: string): Promise<string | null> {
+        try {
+            const q = encodeURIComponent(`${title} ${author}`);
+            const res = await fetch(`https://openlibrary.org/search.json?q=${q}&limit=1&fields=cover_i`);
+            const data = await res.json();
+            if (data.docs?.[0]?.cover_i) {
+                return `https://covers.openlibrary.org/b/id/${data.docs[0].cover_i}-L.jpg`;
+            }
+        } catch (e) { return null; }
+        return null;
+    }
+
+    async function searchAniListCover(title: string): Promise<string | null> {
+        try {
+            const query = `query ($search: String) { Media(search: $search, type: MANGA) { coverImage { large } } }`;
+            const res = await fetch('https://graphql.anilist.co', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, variables: { search: title } })
+            });
+            const data = await res.json();
+            return data.data?.Media?.coverImage?.large || null;
+        } catch (e) { return null; }
+    }
+    // -------------------------------------
+
 
     // Filter Logic
     $: filteredBooks = books.filter((book: Book) => {
@@ -56,9 +116,9 @@
   // }
 
   /* 
-     ================================================================
-     SECTION 3: ACTION HANDLERS
-     ================================================================
+      ================================================================
+      SECTION 3: ACTION HANDLERS
+      ================================================================
   */
   // {
     async function handleBookUpdate(event: CustomEvent<Book>) {

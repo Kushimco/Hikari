@@ -232,6 +232,33 @@ async fn delete_library(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn update_book_cover(app: tauri::AppHandle, id: String, cover: String) -> Result<(), String> {
+    // 1. Get the path to library.json manually (same way get_books does it)
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let library_path = app_data_dir.join("library.json");
+
+    // 2. Read existing books
+    let mut books: Vec<Book> = if library_path.exists() {
+        let file = std::fs::File::open(&library_path).map_err(|e| e.to_string())?;
+        serde_json::from_reader(file).unwrap_or_else(|_| Vec::new())
+    } else {
+        Vec::new()
+    };
+
+    // 3. Find and update the book
+    if let Some(book) = books.iter_mut().find(|b| b.id == id) {
+        book.cover = cover;
+        
+        // 4. Save back to JSON
+        let json = serde_json::to_string_pretty(&books).map_err(|e| e.to_string())?;
+        std::fs::write(library_path, json).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Book not found".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -246,7 +273,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_books, add_book, update_book_status, delete_book, 
-            update_book_progress, backup_library, restore_library, delete_library
+            update_book_progress, backup_library, restore_library, delete_library, update_book_cover
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
