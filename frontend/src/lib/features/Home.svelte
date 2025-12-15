@@ -80,18 +80,20 @@
     showHomeExpandOrb ||
     overlayHoldVisible;
 
+  // FIX: Only lock interaction during ACTIVE transitions (opening/closing).
+  // Removed "settingsStage !== idle" so you can click sidebar while viewing settings.
+  $: isInteractionLocked = isOpeningSettings || returningFromSettings;
+
   // #endregion
 
   // #region --- LIFECYCLE & WATCHERS ---
 
   onMount(() => {
     checkGoalCompletion();
-    
-    // Polling every 1.5s to catch updates instantly on any page
+    // 1.5s Polling loop
     goalCheckInterval = window.setInterval(() => {
         checkGoalCompletion();
     }, 1500);
-
     window.addEventListener('hikari-update', checkGoalCompletion);
   });
 
@@ -109,12 +111,20 @@
     if (activeTab === "settings" && requestedTab === "home" && !returningFromSettings) {
       returningFromSettings = true;
       settingsStage = "gathering";
+      
+      // Safety Valve: Force unlock if stuck > 2.5s
+      setTimeout(() => {
+        if (returningFromSettings) {
+           handleSettingsReadyToExpand();
+        }
+      }, 2500);
+
     } else if (!returningFromSettings) {
       activeTab = requestedTab;
     }
   }
 
-  // Watch for active tab changes (Animation logic)
+  // Watch for active tab changes
   $: if (activeTab !== previousTab) {
     if (activeTab === "home" && !suppressHomeBounceOnce) {
       triggerBounceSequence();
@@ -177,12 +187,10 @@
     settingsStage = "glowing";
     await wait(240);
     if (activeTab === "settings") settingsStage = "dividing";
-    isOpeningSettings = false;
+    isOpeningSettings = false; // Lock releases here
   }
 
   async function handleSettingsReadyToExpand() {
-    if (!returningFromSettings) return;
-
     overlayHoldVisible = true;
     overlayGlowOff = false;
     showHomeExpandOrb = true;
@@ -197,8 +205,9 @@
 
     suppressHomeBounceOnce = true;
     skipHomeIntroOnce = true;
-    returningFromSettings = false;
+    returningFromSettings = false; // Lock releases here
     settingsStage = "idle";
+    
     activeTab = "home";
     requestedTab = "home";
 
@@ -450,33 +459,29 @@
     }
   }
 
-  // --- REFINED GOAL CHECK ---
   async function checkGoalCompletion() {
     try {
       const savedGoal = localStorage.getItem('hikari_reading_goal');
       const currentGoal = savedGoal ? parseInt(savedGoal, 10) : 10;
       readingGoal = currentGoal;
 
-      // 1. Detect Goal Change (Settings) -> RESET
       const lastKnownGoalStr = localStorage.getItem('hikari_last_known_goal');
       const lastKnownGoal = lastKnownGoalStr ? parseInt(lastKnownGoalStr, 10) : null;
       
+      // Auto-Reset if Goal Changed
       if (lastKnownGoal !== currentGoal) {
         localStorage.setItem('hikari_goal_notified_master', 'false');
         localStorage.setItem('hikari_last_known_goal', currentGoal.toString());
       }
 
-      // 2. Get Count
       const books: any[] = await invoke('get_books');
       booksFinishedCount = books.filter(b => b.status === 'finished').length;
 
-      // 3. RE-ARM LOGIC: If we dropped BELOW the goal, reset the flag.
-      // This allows the notification to trigger again when we go back UP.
+      // Re-Arm if books dropped below goal
       if (booksFinishedCount < currentGoal) {
         localStorage.setItem('hikari_goal_notified_master', 'false');
       }
 
-      // 4. Notify
       const alreadyNotified = localStorage.getItem('hikari_goal_notified_master') === 'true';
 
       if (booksFinishedCount >= currentGoal && booksFinishedCount > 0) {
@@ -488,7 +493,7 @@
         }
       }
     } catch (err) {
-      // Silent fail during polling
+      // Silent catch
     }
   }
 
@@ -497,7 +502,11 @@
 
 <main>
   <Background />
-  <Sidebar bind:activeTab={requestedTab} />
+  
+  <!-- LOCK WRAPPER: Only active during transitions (opening/returning) -->
+  <div class="sidebar-wrapper" class:interaction-lock={isInteractionLocked}>
+    <Sidebar bind:activeTab={requestedTab} />
+  </div>
 
   <section class="orb-stage">
     {#if activeTab === "settings"}
@@ -630,12 +639,19 @@
   
   .library-container { opacity: 1; }
   .library-container.fade-out { opacity: 0; transition: opacity 0.25s ease-out; }
+  
+  /* LOCK STYLE */
+  .sidebar-wrapper { z-index: 10; }
+  .interaction-lock {
+    pointer-events: none;
+    /* Removed opacity change to make it feel seamless */
+  }
   /* #endregion */
 
   /* #region --- TOAST STYLES --- */
   .goal-toast {
     position: fixed; top: 30px; right: 30px; 
-    z-index: 2147483647; /* Highest possible Z-Index */
+    z-index: 2147483647; 
     display: flex; align-items: center; gap: 12px;
     padding: 12px 18px; min-width: 280px;
     background: linear-gradient(135deg, rgba(255, 250, 245, 0.95), rgba(255, 235, 225, 0.90));
