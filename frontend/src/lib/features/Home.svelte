@@ -34,6 +34,10 @@
   let skipHomeIntroOnce = false;
   let suppressHomeBounceOnce = false;
   let isReturning = false;
+  
+  // New flags for delayed Library content
+  let libraryEnterFromSettings = false;
+  let libraryContentVisible = true; // Default to TRUE so normal nav works instantly
 
   const OVERLAY_EXPAND_MS = 650;
   const OVERLAY_FADE_MS = 900;
@@ -80,8 +84,7 @@
     showHomeExpandOrb ||
     overlayHoldVisible;
 
-  // FIX: Only lock interaction during ACTIVE transitions (opening/closing).
-  // Removed "settingsStage !== idle" so you can click sidebar while viewing settings.
+  // LOCK: Only lock interaction during ACTIVE transitions (opening/closing).
   $: isInteractionLocked = isOpeningSettings || returningFromSettings;
 
   // #endregion
@@ -90,7 +93,6 @@
 
   onMount(() => {
     checkGoalCompletion();
-    // 1.5s Polling loop
     goalCheckInterval = window.setInterval(() => {
         checkGoalCompletion();
     }, 1500);
@@ -108,11 +110,12 @@
       checkGoalCompletion();
     }
 
-    if (activeTab === "settings" && requestedTab === "home" && !returningFromSettings) {
+    // Logic: If in Settings and user clicks Home OR Menu
+    if (activeTab === "settings" && (requestedTab === "home" || requestedTab === "menu") && !returningFromSettings) {
       returningFromSettings = true;
       settingsStage = "gathering";
       
-      // Safety Valve: Force unlock if stuck > 2.5s
+      // Safety Valve
       setTimeout(() => {
         if (returningFromSettings) {
            handleSettingsReadyToExpand();
@@ -187,10 +190,34 @@
     settingsStage = "glowing";
     await wait(240);
     if (activeTab === "settings") settingsStage = "dividing";
-    isOpeningSettings = false; // Lock releases here
+    isOpeningSettings = false; 
   }
 
   async function handleSettingsReadyToExpand() {
+    // 1. Check where we are going
+    const goingToMenu = requestedTab === "menu";
+
+    // 2. PATH A: Going to Library (Menu)
+    if (goingToMenu) {
+      libraryEnterFromSettings = true;
+      libraryContentVisible = false; // Force hide content initially
+      
+      returningFromSettings = false;
+      settingsStage = "idle";
+      
+      activeTab = "menu"; // Switch immediately
+      await tick();
+
+      // MANUAL DELAY: Wait 600ms (matching the scale duration) then show content
+      setTimeout(() => {
+        libraryContentVisible = true;
+        libraryEnterFromSettings = false;
+      }, 600);
+      
+      return; 
+    }
+
+    // 3. PATH B: Going to Home
     overlayHoldVisible = true;
     overlayGlowOff = false;
     showHomeExpandOrb = true;
@@ -205,7 +232,7 @@
 
     suppressHomeBounceOnce = true;
     skipHomeIntroOnce = true;
-    returningFromSettings = false; // Lock releases here
+    returningFromSettings = false;
     settingsStage = "idle";
     
     activeTab = "home";
@@ -503,7 +530,6 @@
 <main>
   <Background />
   
-  <!-- LOCK WRAPPER: Only active during transitions (opening/returning) -->
   <div class="sidebar-wrapper" class:interaction-lock={isInteractionLocked}>
     <Sidebar bind:activeTab={requestedTab} />
   </div>
@@ -556,8 +582,21 @@
               />
             </div>
           {:else if activeTab === "menu" || (isReturning && returnStage === "fading")}
-            <div class="library-container" class:fade-out={returnStage === "fading"} in:fade={{ duration: 400, delay: 700 }}>
-              <Library on:change={checkGoalCompletion} on:update={checkGoalCompletion} />
+            
+            <div class="library-container" 
+                 class:fade-out={returnStage === "fading"} 
+                 in:scale={libraryEnterFromSettings 
+                    ? { start: 0.1, opacity: 0, duration: 600, easing: cubicOut }
+                    : { start: 0.95, opacity: 0, duration: 400, delay: 550, easing: cubicOut }
+                 }>
+              
+              <!-- Manual visibility control for Settings->Library flow -->
+              {#if libraryContentVisible}
+                <div class="inner-library-fade" in:fade={{ duration: 400, delay: 30 }}>
+                  <Library on:change={checkGoalCompletion} on:update={checkGoalCompletion} />
+                </div>
+              {/if}
+              
             </div>
           {/if}
         </Orb>
@@ -640,12 +679,12 @@
   .library-container { opacity: 1; }
   .library-container.fade-out { opacity: 0; transition: opacity 0.25s ease-out; }
   
+  /* Wrapper to allow fading inner library content */
+  .inner-library-fade { width: 100%; height: 100%; }
+
   /* LOCK STYLE */
   .sidebar-wrapper { z-index: 10; }
-  .interaction-lock {
-    pointer-events: none;
-    /* Removed opacity change to make it feel seamless */
-  }
+  .interaction-lock { pointer-events: none; }
   /* #endregion */
 
   /* #region --- TOAST STYLES --- */

@@ -61,7 +61,7 @@
 <style>
   /* #region --- 1. FLOATER WRAPPER --- */
   .orb-floater {
-    width: 780px; height: 780px; margin-left: -105px;
+    width: 780px; height: 780px; margin-left: -102px;
     display: flex; justify-content: center; align-items: center;
     will-change: transform;
     transition:
