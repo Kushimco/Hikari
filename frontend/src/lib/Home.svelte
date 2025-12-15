@@ -92,6 +92,36 @@
     return new Promise<void>((r) => setTimeout(r, ms));
   }
 
+  // --- CUSTOM TRANSITION: Moves Orb Left & Shrinks when opening settings ---
+  function orbSettingsOut(_: Element, { duration, easing }: any) {
+    // Check if we are specifically transitioning TO settings
+    if (isOpeningSettings) {
+        return {
+            duration,
+            easing,
+            css: (t: number) => {
+                // t goes from 1 (start) to 0 (end) during 'out'
+                const inverted = 1 - t;
+                
+                // Scale from 1 down to 0.15
+                const s = 0.15 + (0.85 * t);
+                
+                // Move Left: 0px to -45px (updated as requested)
+                const x = -38 * inverted; 
+
+                return `transform: translateX(${x}px) scale(${s}); opacity: ${t};`;
+            }
+        };
+    } else {
+        // Fallback for other exits (just standard scale)
+        return {
+            duration,
+            easing,
+            css: (t: number) => `transform: scale(${0.12 + 0.88 * t}); opacity: ${t};`
+        };
+    }
+  }
+
   // --- GOAL CHECKER LOGIC ---
   async function checkGoalCompletion() {
     try {
@@ -551,7 +581,7 @@
           ? { duration: 0 }
           : { duration: 600, easing: cubicOut, start: 0.2, delay: 200 }
         }
-        out:scale={{ duration: 650, easing: cubicIn, start: 0.12 }}
+        out:orbSettingsOut={{ duration: 650, easing: cubicIn }}
         on:outroend={handleOrbOutroEnd}
       >
         <Orb
