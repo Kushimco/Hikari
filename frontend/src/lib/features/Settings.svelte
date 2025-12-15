@@ -54,7 +54,7 @@
         revealCount -= 1; pulseKey += 1;
         if (revealCount <= 0) {
           revealCount = 0; stop();
-          window.setTimeout(() => { dispatch('readyToExpand'); }, 180);
+          window.setTimeout(() => { dispatch('readyToExpand'); }, 20);
         }
       }, gatherEveryMs);
     }
@@ -148,8 +148,6 @@
       setTimeout(() => (pulsingId = null), 180);
     }
 
-    function handleAction(actionId: string) { if (actionId === 'theme') dispatch('select', { id: 'theme' }); }
-
     // Database Operations
     async function handleBackup() {
       try {
@@ -225,7 +223,9 @@
     <button class="popup-backdrop" type="button" on:click={closePopup} aria-label="Close" transition:fade={{ duration: 200 }}></button>
 
     <div class="popup-anchor" style="{popupStyle}">
-      <dialog class="popup-card themed" open bind:this={popupDialog} tabindex="-1" on:click|stopPropagation
+      <!-- ADDED CLASS: disabled-look if appearance -->
+      <dialog class="popup-card themed" class:disabled-look={activePopup === 'appearance'}
+        open bind:this={popupDialog} tabindex="-1" on:click|stopPropagation
         style="transform-origin: {popupOrigin};"
         in:scale={{ start: 0.8, opacity: 0, duration: 250, easing: elasticOut }}
         out:scale={{ start: 0.9, opacity: 0, duration: 150, easing: cubicOut }}>
@@ -304,9 +304,9 @@
 
               {:else if activePopup === 'appearance'}
                   <div class="action-grid mini">
-                      <button class="action-row mini" on:click={() => handleAction('theme')}>
+                      <button class="action-row mini disabled-action" disabled>
                       <div class="action-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21a9 9 0 1 0 0-18c4.97 0 9 2 9 6Z"/></svg></div>
-                      <span>Dark Mode</span>
+                      <span>Dark Mode (Soon)</span>
                       </button>
                   </div>
               {/if}
@@ -380,6 +380,17 @@
     box-shadow: 0 10px 40px rgba(94, 75, 75, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 0 20px rgba(255, 200, 150, 0.1); 
     border: 1px solid rgba(255, 255, 255, 0.6); padding: 0; margin: 0; overflow: hidden; 
   }
+  
+  /* NEW DISABLED LOOK CLASS */
+  .popup-card.themed.disabled-look {
+    filter: grayscale(0.5); /* Desaturate it */
+    background: linear-gradient(135deg, #e0d8d0 0%, #d6cec5 100%); /* Dull background */
+  }
+  .popup-card.themed.disabled-look .popup-header,
+  .popup-card.themed.disabled-look .popup-body {
+    opacity: 0.6; /* Fade content */
+  }
+
   .popup-glow { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(circle at top left, rgba(255, 180, 140, 0.15), transparent 70%); }
   .popup-content-wrapper { position: relative; z-index: 2; }
   
@@ -407,6 +418,19 @@
   .action-icon { width: 16px; height: 16px; opacity: 0.75; }
   .action-row.mini.danger { color: #a63a3a; background: rgba(255, 230, 230, 0.4); border-color: rgba(255, 200, 200, 0.3); }
   .action-row.mini.danger:hover { background: rgba(255, 220, 220, 0.6); }
+
+  /* Disabled button style */
+  .action-row.mini.disabled-action {
+    cursor: not-allowed;
+    opacity: 0.5;
+    background: transparent;
+    border-color: rgba(0,0,0,0.05);
+  }
+  .action-row.mini.disabled-action:hover {
+    background: transparent;
+    transform: none;
+    box-shadow: none;
+  }
   /* #endregion */
 
   /* #region --- STATS UI --- */

@@ -212,7 +212,7 @@
       setTimeout(() => {
         libraryContentVisible = true;
         libraryEnterFromSettings = false;
-      }, 600);
+      }, 300);
       
       return; 
     }
