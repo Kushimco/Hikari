@@ -2,7 +2,7 @@
 
 **A minimal, animated library for your digital bookshelf.**
 
-Hikari is a desktop application built to track the books and manga you are reading. It was created as a personal project to explore modern desktop development, combining the performance of **Rust** with the fluidity of **Svelte**.
+Hikari is a desktop application built to track the books you are reading. It was created as a personal project to explore modern desktop development, combining the performance of **Rust** with the fluidity of **Svelte**.
 
 This documentation is divided into two sections:
 
@@ -35,7 +35,7 @@ Hikari features a unique "Orb" interface that morphs and adapts as you navigate.
 
 ## 🛠️ Developer Guide
 
-It is built on the **Tauri v2** stack, ensuring a tiny bundle size and native performance.
+It is built on the **Tauri v2** stack.
 
 ### 📂 Project Structure
 
@@ -100,7 +100,7 @@ npx tauri build
 - **Core**: Rust (Tauri v2)
 - **Frontend**: Svelte 5 + TypeScript
 - **Styling**: CSS (Custom animations & Glassmorphism)
-- **Data**: Local JSON file system (No database required)
+- **Data**: Local JSON file
 
 ---
 
